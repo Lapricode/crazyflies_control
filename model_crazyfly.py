@@ -5,17 +5,18 @@ from lie_theory_lib import SO3_rotation as SO3, S3_rotation as S3
 
 """
 Quadrotor system:
-state:      x = [rw, Rwb, vb, omegab] \in R^(12x1)
+state:      x = [rw, qwb, vb, omegab] \in R^(13x1)
             where   rw \in R^(3x1) is the position in the world frame
-                    Rwb \in R^(3x3) is the rotation matrix of the body frame w.r.t. the world frame
-                    Rwb \in R^(3x3) has dimension 3
+                    qwb \in R^(4x1) is the orientation quaternion of the body frame w.r.t. the world frame
                     vb \in R^(3x1) is the linear velocity in the body frame
                     omegab \in R^(3x1) is the angular velocity in the body frame
 control:    u = [u1, u2, u3, u4] \in R^(4x1)
             where u_i is the angular velocity of the i-th motor in rad/s
 
-note: the state x comes with the quaternion qwb of the rotation matrix Rwb,
+note:   the state x comes with the quaternion qwb of the rotation matrix Rwb,
         but we use the rotation matrix Rwb directly for the dynamics and the jacobians calculations
+        Rwb \in R^(3x3) is the rotation matrix of the body frame w.r.t. the world frame
+        Rwb \in R^(3x3) has dimension 3
 """
 
 
@@ -38,7 +39,7 @@ def quadrotor_dynamics(x, u):
     omegab = x[10:13]  # angular velocity in the body frame
     Rwb = S3.Rq_mat(qwb)  # rotation matrix of the body frame w.r.t. the world frame
     rw_dot = Rwb @ vb  # linear velocity in the world frame
-    # Rwb_dot = Rwb @ SO3.hat(omegab)  # derivative of the rotation matrix of the body frame w.r.t. the world frame
+    Rwb_dot = Rwb @ SO3.hat(omegab)  # derivative of the rotation matrix of the body frame w.r.t. the world frame
     F_b = Rwb.T @ np.array([0, 0, -m * g]) + np.array([0, 0, Kf * np.sum(u)])  # force in the body frame
     T_b = np.array([l * Kf * (u[0] -u[2]), l * Kf * (u[3] - u[1]), Kt * (u[0] + u[2] - u[1] - u[3])])  # torque in the body frame
     vb_dot = 1/m * F_b - np.cross(omegab, vb)  # linear acceleration in the body frame
@@ -93,23 +94,39 @@ def tvlqr(xkstar_list, ukstar_list, Q, Qf, R):
         Kc[k] = Kc
     return Kc  # return the gain matrices Kc for each time step
 
-def compute_state_error(x, x_ref):
-    rw = x[:3]
-    qwb = x[3:7]
-    Rwb = S3.Rq_mat(qwb)
-    vb = x[7:10]
-    omegab = x[10:13]
-    rw_ref = x_ref[:3]
-    qwb_ref = x_ref[3:7]
-    Rwb_ref = S3.Rq_mat(qwb_ref)
-    vb_ref = x_ref[7:10]
-    omegab_ref = x_ref[10:13]
-    rw_error = rw - rw_ref
-    Rwb_error = SO3.minus_right(Rwb, Rwb_ref)
-    vb_error = vb - vb_ref
-    omegab_error = omegab - omegab_ref
+def compute_state_minus_right(x_1, x_2):
+    rw_1 = x_1[:3]
+    qwb_1 = x_1[3:7]
+    Rwb_1 = S3.Rq_mat(qwb_1)
+    vb_1 = x_1[7:10]
+    omegab_1 = x_1[10:13]
+    rw_2 = x_2[:3]
+    qwb_2 = x_2[3:7]
+    Rwb_2 = S3.Rq_mat(qwb_2)
+    vb_2 = x_2[7:10]
+    omegab_2 = x_2[10:13]
+    rw_error = rw_1 - rw_2
+    Rwb_error = SO3.minus_right(Rwb_1, Rwb_2)
+    vb_error = vb_1 - vb_2
+    omegab_error = omegab_1 - omegab_2
     x_error = np.concatenate([rw_error, Rwb_error, vb_error, omegab_error])
-    return x_error
+    return x_error  # \in R^(12x1)
+
+def compute_state_plus_right(x_1, x_2):
+    rw_1 = x_1[:3]
+    qwb_1 = x_1[3:7]
+    vb_1 = x_1[7:10]
+    omegab_1 = x_1[10:13]
+    rw_2 = x_2[:3]
+    qwb_2 = x_2[3:7]
+    vb_2 = x_2[7:10]
+    omegab_2 = x_2[10:13]
+    rw_sum = rw_1 + rw_2
+    qwb_sum = S3.plus_right(qwb_1, qwb_2)
+    vb_sum = vb_1 + vb_2
+    omegab_sum = omegab_1 + omegab_2
+    x_sum = np.concatenate([rw_sum, qwb_sum, vb_sum, omegab_sum])
+    return x_sum  # \in R^(13x1)
 
 def run_quadrotor(x0, x_ref, u_bar, u_lim, K_inf, dt, tf):
     x = np.copy(x0)
@@ -124,7 +141,7 @@ def run_quadrotor(x0, x_ref, u_bar, u_lim, K_inf, dt, tf):
         positions.append(rw)
         orientations.append(Rwb)
 
-        u = u_bar - K_inf @ (compute_state_error(x, x_ref))
+        u = u_bar - K_inf @ (compute_state_minus_right(x, x_ref))
         # u = 1.0 * np.pi/5. * np.array([1, 1, 1, 1])
         u = np.clip(u, -u_lim, u_lim)
         rw_dot, vb_dot, omegab_dot = quadrotor_dynamics(x, u)
