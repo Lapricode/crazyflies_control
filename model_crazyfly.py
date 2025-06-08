@@ -3,6 +3,22 @@ from visualize_crazyfly import quadrotor_visualize
 from lie_theory_lib import SO3_rotation as SO3, S3_rotation as S3
 
 
+"""
+Quadrotor system:
+state:      x = [rw, Rwb, vb, omegab] \in R^(12x1)
+            where   rw \in R^(3x1) is the position in the world frame
+                    Rwb \in R^(3x3) is the rotation matrix of the body frame w.r.t. the world frame
+                    Rwb \in R^(3x3) has dimension 3
+                    vb \in R^(3x1) is the linear velocity in the body frame
+                    omegab \in R^(3x1) is the angular velocity in the body frame
+control:    u = [u1, u2, u3, u4] \in R^(4x1)
+            where u_i is the angular velocity of the i-th motor in rad/s
+
+note: the state x comes with the quaternion qwb of the rotation matrix Rwb,
+        but we use the rotation matrix Rwb directly for the dynamics and the jacobians calculations
+"""
+
+
 l = 0.05  # length of the quadrotor arm in m
 g = 9.81  # acceleration due to gravity in m/s^2
 m = 0.05  # mass of the quadrotor in kg
@@ -10,7 +26,7 @@ I = np.diag([1e-3, 1e-3, 1e-3])  # inertia matrix of the quadrotor in kg*m^2
 I_inv = np.linalg.inv(I)  # inverse of the inertia matrix
 Kf = 1e-2  # thrust coefficient in N/(rad/s)
 Kt = 1e-2  # torque coefficient in N*m/(rad/s)
-N = 13  # number of states in the quadrotor dynamics
+N = 12  # number of states in the quadrotor dynamics
 M = 4  # number of inputs in the quadrotor dynamics
 
 def quadrotor_dynamics(x, u):
@@ -33,7 +49,13 @@ def quadrotor_dynamics_dx(x, u):
     return
 
 def quadrotor_dynamics_du(x, u):
-    return
+    B = np.zeros((N, M))
+    B[8, :] = np.array([Kf / m, Kf / m, Kf / m, Kf / m])
+    B[9:12, 0] = I_inv @ np.array([l * Kf, 0., Kt])
+    B[9:12, 1] = I_inv @ np.array([0., -l * Kf, -Kt])
+    B[9:12, 2] = I_inv @ np.array([-l * Kf, 0., Kt])
+    B[9:12, 3] = I_inv @ np.array([0., l * Kf, -Kt])
+    return B
 
 def linearize_quadrotor_dynamics(x_bar, u_bar, dynamics, dt):
     A = np.zeros((N, N))
@@ -71,6 +93,24 @@ def tvlqr(xkstar_list, ukstar_list, Q, Qf, R):
         Kc[k] = Kc
     return Kc  # return the gain matrices Kc for each time step
 
+def compute_state_error(x, x_ref):
+    rw = x[:3]
+    qwb = x[3:7]
+    Rwb = S3.Rq_mat(qwb)
+    vb = x[7:10]
+    omegab = x[10:13]
+    rw_ref = x_ref[:3]
+    qwb_ref = x_ref[3:7]
+    Rwb_ref = S3.Rq_mat(qwb_ref)
+    vb_ref = x_ref[7:10]
+    omegab_ref = x_ref[10:13]
+    rw_error = rw - rw_ref
+    Rwb_error = SO3.minus_right(Rwb, Rwb_ref)
+    vb_error = vb - vb_ref
+    omegab_error = omegab - omegab_ref
+    x_error = np.concatenate([rw_error, Rwb_error, vb_error, omegab_error])
+    return x_error
+
 def run_quadrotor(x0, x_ref, u_bar, u_lim, K_inf, dt, tf):
     x = np.copy(x0)
     positions = []
@@ -84,7 +124,7 @@ def run_quadrotor(x0, x_ref, u_bar, u_lim, K_inf, dt, tf):
         positions.append(rw)
         orientations.append(Rwb)
 
-        u = u_bar - K_inf @ (x - x_ref)
+        u = u_bar - K_inf @ (compute_state_error(x, x_ref))
         # u = 1.0 * np.pi/5. * np.array([1, 1, 1, 1])
         u = np.clip(u, -u_lim, u_lim)
         rw_dot, vb_dot, omegab_dot = quadrotor_dynamics(x, u)
