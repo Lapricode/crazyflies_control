@@ -9,7 +9,6 @@ def on_key(event):
         exit_flag['quit'] = True
 
 def quadrotor_visualize(positions, orientations, delay, traj_step, l):
-
     positions = np.asarray([positions[k] for k in range(0, len(positions), traj_step)] + [positions[-1]])
     orientations = np.asarray([orientations[k] for k in range(0, len(orientations), traj_step)] + [orientations[-1]])
     if positions.shape[0] != orientations.shape[0]:
@@ -62,9 +61,9 @@ def quadrotor_visualize(positions, orientations, delay, traj_step, l):
         ax_world.set_ylim(y_min, y_max)
         ax_world.set_zlim(z_min, z_max)
 
-        ax_world.scatter(*pB, c = 'k', s = 40, label = 'Body')
+        ax_world.scatter(*pB, c = 'k', s = 50, label = 'Body')
         ax_world.scatter(motor_coords[:, 0], motor_coords[:, 1], motor_coords[:, 2],
-                         c = 'g', s = 30, label = 'Motors')
+                         c = 'g', s = 50, label = 'Motors')
 
         for i, pM in enumerate([pM1, pM2, pM3, pM4]):
             ax_world.plot([pB[0], pM[0]], [pB[1], pM[1]], [pB[2], pM[2]], 'r-', linewidth = 2)
@@ -88,9 +87,9 @@ def quadrotor_visualize(positions, orientations, delay, traj_step, l):
         quad_points = (R @ body_points.T).T + x[np.newaxis, :]
         pB_q, pM1_q, pM2_q, pM3_q, pM4_q = quad_points
         motor_coords_q = np.vstack([pM1_q, pM2_q, pM3_q, pM4_q])
-        ax_body.scatter(*pB_q, c = 'k', s = 40, label = 'Body')
+        ax_body.scatter(*pB_q, c = 'k', s = 50, label = 'Body')
         ax_body.scatter(motor_coords_q[:, 0], motor_coords_q[:, 1], motor_coords_q[:, 2],
-                        c = 'g', s = 30, label = 'Motors')
+                        c = 'g', s = 50, label = 'Motors')
 
         for i, pM in enumerate([pM1_q, pM2_q, pM3_q, pM4_q]):
             ax_body.plot([pB_q[0], pM[0]], [pB_q[1], pM[1]], [pB_q[2], pM[2]], 'r-', linewidth = 2)
