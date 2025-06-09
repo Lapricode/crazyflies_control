@@ -23,7 +23,13 @@ note:   the state x comes with the quaternion qwb of the rotation matrix Rwb,
 l = 0.05  # length of the quadrotor arm in m
 g = 9.81  # acceleration due to gravity in m/s^2
 m = 0.05  # mass of the quadrotor in kg
-I = np.diag([1e-3, 1e-3, 1e-3])  # inertia matrix of the quadrotor in kg*m^2
+Ixx = 1e-3
+Iyy = 2e-3
+Izz = 3e-3
+Ixy = 0.0
+Iyz = 0.0
+Ixz = 0.0
+I = np.array([[Ixx, Ixy, Ixz], [Ixy, Iyy, Iyz], [Ixz, Iyz, Izz]])  # inertia matrix of the quadrotor in kg*m^2
 I_inv = np.linalg.inv(I)  # inverse of the inertia matrix
 Kf = 1e-2  # thrust coefficient in N/(rad/s)
 Kt = 1e-2  # torque coefficient in N*m/(rad/s)
@@ -39,7 +45,7 @@ def quadrotor_dynamics(x, u):
     omegab = x[10:13]  # angular velocity in the body frame
     Rwb = S3.Rq_mat(qwb)  # rotation matrix of the body frame w.r.t. the world frame
     rw_dot = Rwb @ vb  # linear velocity in the world frame
-    Rwb_dot = Rwb @ SO3.hat(omegab)  # derivative of the rotation matrix of the body frame w.r.t. the world frame
+    # Rwb_dot = Rwb @ SO3.hat(omegab)  # derivative of the rotation matrix of the body frame w.r.t. the world frame
     F_b = Rwb.T @ np.array([0, 0, -m * g]) + np.array([0, 0, Kf * np.sum(u)])  # force in the body frame
     T_b = np.array([l * Kf * (u[0] -u[2]), l * Kf * (u[3] - u[1]), Kt * (u[0] + u[2] - u[1] - u[3])])  # torque in the body frame
     vb_dot = 1/m * F_b - np.cross(omegab, vb)  # linear acceleration in the body frame
@@ -47,7 +53,24 @@ def quadrotor_dynamics(x, u):
     return rw_dot, vb_dot, omegab_dot
 
 def quadrotor_dynamics_dx(x, u):
-    return
+    A = np.zeros((N, N))
+    rw = x[:3]
+    qwb = x[3:7]
+    Rwb = S3.Rq_mat(qwb)
+    vb = x[7:10]
+    omegab = x[10:13]
+    vb_hat = SO3.vec_hat(vb)
+    omegab_hat = SO3.vec_hat(omegab)
+    Iomegab_hat = SO3.vec_hat(I @ omegab)
+    A[0:3, 3:6] = -Rwb @ vb_hat
+    A[0:3, 6:9] = Rwb
+    A[3:6, 3:6] = np.eye(3)
+    A[3:6, 9:12] = np.eye(3)
+    A[6:9, 3:6] = Rwb.T @ SO3.vec_hat(np.array([0., 0., -g])) @ Rwb
+    A[6:9, 6:9] = -omegab_hat
+    A[6:9, 9:12] = vb_hat
+    A[9:12, 9:12] = -I_inv @ (omegab_hat @ I - Iomegab_hat)
+    return A
 
 def quadrotor_dynamics_du(x, u):
     B = np.zeros((N, M))
@@ -58,10 +81,11 @@ def quadrotor_dynamics_du(x, u):
     B[9:12, 3] = I_inv @ np.array([0., l * Kf, -Kt])
     return B
 
-def linearize_quadrotor_dynamics(x_bar, u_bar, dynamics, dt):
-    A = np.zeros((N, N))
-    B = np.zeros((N, M))
-    return A, B
+def euler(xk, uk, dynamics, dt):
+    return
+
+def linearize_euler(x_bar, u_bar, dynamics, dt):
+    return
 
 def runge_kutta_4th_order(xk, uk, dynamics, dt):
     f1 = dynamics(xk, uk)
@@ -71,8 +95,13 @@ def runge_kutta_4th_order(xk, uk, dynamics, dt):
     x = xk + dt / 6. * (f1 + 2. * f2 + 2. * f3 + f4)
     return x
 
+def linearize_runge_kutta(x_bar, u_bar, dynamics, dt):
+    A = np.zeros((N, N))
+    B = np.zeros((N, M))
+    return A, B
+
 def lqr(A, B, Q, Qf, R):
-    K = 100
+    K = 1000
     Kc = np.zeros((M, N))
     Pc = Qf
     for k in range(K-2, -1, -1):
@@ -86,7 +115,7 @@ def tvlqr(xkstar_list, ukstar_list, Q, Qf, R):
     Kc = [np.zeros((M, N)) for _ in range(len(ukstar_list))]
     Pc = Qf
     for k in range(len(xkstar_list) - 2, -1, -1):
-        Ak, Bk = linearize_quadrotor_dynamics(xkstar_list[k], ukstar_list[k], quadrotor_dynamics, dt)
+        Ak, Bk = linearize_runge_kutta(xkstar_list[k], ukstar_list[k], quadrotor_dynamics, dt)
         tmp_1 = R + Bk.T @ Pc @ Bk
         tmp_2 = Bk.T @ Pc @ Ak
         Kc = np.linalg.solve(tmp_1, tmp_2)
@@ -94,7 +123,7 @@ def tvlqr(xkstar_list, ukstar_list, Q, Qf, R):
         Kc[k] = Kc
     return Kc  # return the gain matrices Kc for each time step
 
-def compute_state_minus_right(x_1, x_2):
+def compute_state_right_minus(x_1, x_2):
     rw_1 = x_1[:3]
     qwb_1 = x_1[3:7]
     Rwb_1 = S3.Rq_mat(qwb_1)
@@ -112,7 +141,7 @@ def compute_state_minus_right(x_1, x_2):
     x_error = np.concatenate([rw_error, Rwb_error, vb_error, omegab_error])
     return x_error  # \in R^(12x1)
 
-def compute_state_plus_right(x_1, x_2):
+def compute_state_right_plus(x_1, x_2):
     rw_1 = x_1[:3]
     qwb_1 = x_1[3:7]
     vb_1 = x_1[7:10]
@@ -165,9 +194,16 @@ x_ref = np.array([0.0, 0.0, 1.0, \
                   1.0, 0.0, 0.0, 0.0, \
                   0.0, 0.0, 0.0, \
                   0.0, 0.0, 0.0])
+x_bar = np.copy(x0)
 dt = 1e-2
-tf = 2
-K_inf = np.zeros((4, 13))
+tf = 10
+A = quadrotor_dynamics_dx(x_bar, u_bar)
+B = quadrotor_dynamics_du(x_bar, u_bar)
+Q = np.diag([10., 10., 10., 10., 10., 10., 10., 10., 10., 10., 10., 10.])
+Qf = np.diag([10., 10., 10., 10., 10., 10., 10., 10., 10., 10., 10., 10.])
+R = np.diag([1., 1., 1., 1.])
+K_inf = lqr(A, B, Q, Qf, R)
+print(K_inf)
 
 positions, orientations = run_quadrotor(x0, x_ref, u_bar, u_lim, K_inf, dt, tf)
 quadrotor_visualize(positions, orientations, dt, 1, l)
