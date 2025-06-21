@@ -63,7 +63,6 @@ def quadrotor_dynamics_dx(x, u):
     omegab = x[10:13]
     vb_hat = SO3.vec_hat(vb)
     omegab_hat = SO3.vec_hat(omegab)
-    Iomegab_hat = SO3.vec_hat(I @ omegab)
     A[0:3, 3:6] = -Rwb @ vb_hat
     A[0:3, 6:9] = Rwb
     # A[3:6, 3:6] = np.eye(3)
@@ -71,7 +70,7 @@ def quadrotor_dynamics_dx(x, u):
     A[6:9, 3:6] = Rwb.T @ SO3.vec_hat(np.array([0., 0., -g])) @ Rwb
     A[6:9, 6:9] = -omegab_hat
     A[6:9, 9:12] = vb_hat
-    A[9:12, 9:12] = -I_inv @ (omegab_hat @ I - Iomegab_hat)
+    A[9:12, 9:12] = -I_inv @ (omegab_hat @ I - SO3.vec_hat(I @ omegab))
     return A
 
 def quadrotor_dynamics_du(x, u):
@@ -123,7 +122,7 @@ def linearize_euler(x_bar, u_bar, dt):
 
     B = np.zeros((N, M))
     B[8, :] = np.array([Kf / m, Kf / m, Kf / m, Kf / m]) * dt
-    B[9:12, :] = I_inv @ np.array([[l * Kf, 0., -l*Kf, 0.], \
+    B[9:12, :] = I_inv @ np.array([[l*Kf, 0., -l*Kf, 0.], \
                                     [0., -l*Kf, 0., l*Kf], \
                                     [Kt, -Kt, Kt, -Kt]]) * dt
     return A, B
@@ -141,10 +140,10 @@ def linearize_runge_kutta(x_bar, u_bar, dynamics, dt):
     B = np.zeros((N, M))
     return A, B
 
-def lqr(A, B, Q, Qf, R, K):
+def lqr(A, B, Q, Qf, R, Knum):
     Kc = np.zeros((M, N))
     Pc = Qf
-    for k in range(K-2, -1, -1):
+    for k in range(Knum-2, -1, -1):
         tmp_1 = R + B.T @ Pc @ B
         tmp_2 = B.T @ Pc @ A
         Kc = np.linalg.solve(tmp_1, tmp_2)
@@ -153,19 +152,19 @@ def lqr(A, B, Q, Qf, R, K):
         Pc = Q + A.T @ Pc @ (A - B @ Kc)
     return Kc  # return the gain matrix Kinf
 
-def tvlqr(xkstar_list, ukstar_list, Q, Qf, R):
-    Kc = [np.zeros((M, N)) for _ in range(len(ukstar_list))]
+def tvlqr(xk, uk, Q, Qf, R, Knum):
+    Kc_list = [np.zeros((M, N)) for _ in range(Knum)]
     Pc = Qf
-    for k in range(len(xkstar_list) - 2, -1, -1):
-        Ak, Bk = linearize_runge_kutta(xkstar_list[k], ukstar_list[k], quadrotor_dynamics, dt)
+    for k in range(Knum - 2, -1, -1):
+        Ak, Bk = linearize_euler(xk[k], uk[k], dt)
         tmp_1 = R + Bk.T @ Pc @ Bk
         tmp_2 = Bk.T @ Pc @ Ak
         Kc = np.linalg.solve(tmp_1, tmp_2)
-        tmp = A - B @ Kc
-        Pc = Q + Kc.T @ R @ Kc + tmp.T @ Pc @ tmp
-        # Pc = Q + Ak.T @ Pc @ (Ak - Bk @ Kc)
-        Kc[k] = Kc
-    return Kc  # return the gain matrices Kc for each time step
+        # tmp = A - B @ Kc
+        # Pc = Q + Kc.T @ R @ Kc + tmp.T @ Pc @ tmp
+        Pc = Q + Ak.T @ Pc @ (Ak - Bk @ Kc)
+        Kc_list[k] = Kc
+    return Kc_list  # return the gain matrices Kc for each time step
 
 def compute_state_right_minus(x_1, x_2):
     rw_1 = x_1[:3]
@@ -201,45 +200,90 @@ def compute_state_right_plus(x_1, x_2):
     x_sum = np.concatenate([rw_sum, qwb_sum, vb_sum, omegab_sum])
     return x_sum  # \in R^(13x1)
 
-def run_quadrotor(x0, x_ref, u_bar, u_lim, K_inf, dt, tf):
+def run_quadrotor_regulate_configuration(x0, x_ref, u_bar, u_lim, Kinf, dt, tf):
     x = np.copy(x0)
     positions = []
     orientations = []
-    for k in range(round(tf / dt) + 1):
+    for k in range(round(tf / dt)):
         rw = x[:3]
         Rwb = S3.Rq_mat(x[3:7])
         positions.append(rw)
         orientations.append(Rwb)
-
-        u = u_bar - K_inf @ (compute_state_right_minus(x, x_ref))
+        u = u_bar - Kinf @ (compute_state_right_minus(x, x_ref))
         # u = 1.0 * np.pi/5. * np.array([1, 1, 1, 1])
         u = np.clip(u, -u_lim, u_lim)
         x = euler(x, u, quadrotor_dynamics, dt)
-    print(f"final error: {compute_state_right_minus(x, x_ref)}")
+    print(f"Final error: {compute_state_right_minus(x, x_ref)}")
+    return positions, orientations
+
+def run_quadrotor_regulate_trajectory(x0, xk, u_bar, u_lim, Kc, dt, tf):
+    x = np.copy(x0)
+    positions = []
+    orientations = []
+    for k in range(round(tf / dt)):
+        rw = x[:3]
+        Rwb = S3.Rq_mat(x[3:7])
+        positions.append(rw)
+        orientations.append(Rwb)
+        u = u_bar - Kc[k] @ (compute_state_right_minus(x, xk[k]))
+        u = np.clip(u, -u_lim, u_lim)
+        x = euler(x, u, quadrotor_dynamics, dt)
+    print(f"Final error: {compute_state_right_minus(x, xk[k])}")
     return positions, orientations
 
 
+dt = 1e-2
+tf = 50
+Q = 10. * np.eye(N)
+Qf = 10. * np.eye(N)
+R = 1. * np.eye(M)
 x0 = np.array([0.0, 0.0, 0.0, \
                 1.0, 0.0, 0.0, 0.0, \
                 0.0, 0.0, 0.0, \
                 0.0, 0.0, 0.0])
-x_ref = np.array([1.0, 2.0, 2.0, \
-                  1.0, 0.0, 0.0, 0.0, \
-                  0.0, 0.0, 0.0, \
-                  0.0, 0.0, 0.0])
 u_ref = m*g/4 / Kf * np.ones(4)  # hovering control input
 u_lim = 10. * (2. * np.pi) * np.ones(4)
-u_bar = np.copy(u_ref)
-x_bar = np.copy(x_ref)
-dt = 1e-2
-tf = 10
-K = round(tf / dt) + 1
-A, B = linearize_euler(x_bar, u_bar, dt)
-Q = 10. * np.eye(N)
-Qf = 10. * np.eye(N)
-R = 1. * np.eye(M)
-K_inf = lqr(A, B, Q, Qf, R, K)
-print(f"K_inf: {K_inf}")
 
-positions, orientations = run_quadrotor(x0, x_ref, u_bar, u_lim, K_inf, dt, tf)
+# r_ref = np.array([1.0, 2.0, 0.7])
+# phi_ref = np.pi / 3.0
+# q_ref = np.array([np.cos(phi_ref / 2.), 0.0, 0.0, np.sin(phi_ref / 2.)])
+# x_ref = np.block([r_ref, \
+#                   q_ref, \
+#                   0.0, 0.0, 0.0, \
+#                   0.0, 0.0, 0.0])
+# u_bar = np.copy(u_ref)
+# x_bar = np.copy(x_ref)
+# A, B = linearize_euler(x_bar, u_bar, dt)
+# Kinf = lqr(A, B, Q, Qf, R, round(tf / dt))
+# print(f"Kinf: {np.round(Kinf, 5)}")
+# positions, orientations = run_quadrotor_regulate_configuration(x0, x_ref, u_bar, u_lim, Kinf, dt, tf)
+
+total_time_vec = np.arange(0, tf, dt)
+tt = 1/10 * tf
+x_initial_traj = np.array([1.0, 2.0, 0.7, \
+                            1.0, 0.0, 0.0, 0.0, \
+                            0.0, 0.0, 0.0, \
+                            0.0, 0.0, 0.0])
+r = 1.0
+freq = 0.1
+x_center = x_initial_traj[0] - r
+y_center = x_initial_traj[1]
+h = x_initial_traj[2]
+xk_traj = [np.array([x_center + r * np.cos(2 * np.pi * freq * t), y_center + r * np.sin(2 * np.pi * freq * t), h, \
+                    1.0, 0.0, 0.0, 0.0, \
+                    0.0, 0.0, 0.0, \
+                    0.0, 0.0, 0.0]) for t in np.arange(0, tf - tt, dt)]
+uk_traj = len(total_time_vec) * [u_ref]
+A, B = linearize_euler(x_initial_traj, u_ref, dt)
+Kinf = lqr(A, B, Q, Qf, R, round(tt / dt))
+positions_1, orientations_1 = run_quadrotor_regulate_configuration(x0, x_initial_traj, u_ref, u_lim, Kinf, dt, tt)
+Kc = tvlqr(xk_traj, uk_traj, Q, Qf, R, round((tf - tt) / dt))
+x0_tt = np.block([np.array(positions_1[-1]), \
+                    1.0, 0.0, 0.0, 0.0, \
+                    0.0, 0.0, 0.0, \
+                    0.0, 0.0, 0.0])
+positions_2, orientations_2 = run_quadrotor_regulate_trajectory(x0_tt, xk_traj, u_ref, u_lim, Kc, dt, tf - tt)
+positions = positions_1 + positions_2
+orientations = orientations_1 + orientations_2
+
 quadrotor_visualize(positions, orientations, 0.01, 10, 0.5, cam_onboard = True)
