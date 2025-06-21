@@ -37,7 +37,7 @@ def quadrotor_visualize(positions, orientations, delay, traj_step, l, cam_onboar
     if cam_onboard:
         ax_body = fig.add_subplot(122, projection = '3d')
         ax_body.set_title("First-person orientation view")
-        ax_body.view_init(elev = 5, azim = 0)
+        ax_body.view_init(elev = 0, azim = 0)
 
     # Animation
     plt.ion()
