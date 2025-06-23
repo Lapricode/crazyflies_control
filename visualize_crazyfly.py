@@ -5,6 +5,8 @@ from mpl_toolkits.mplot3d import Axes3D
 
 def quadrotor_visualize(positions, orientations, delay, traj_step, l, cam_onboard = False):
     positions = np.asarray([positions[k] for k in range(0, len(positions), traj_step)] + [positions[-1]])
+    N = positions.shape[0]
+    trace_positions = []
     orientations = np.asarray([orientations[k] for k in range(0, len(orientations), traj_step)] + [orientations[-1]])
     if positions.shape[0] != orientations.shape[0]:
         raise ValueError("positions and orientations must have the same length N.")
@@ -42,13 +44,16 @@ def quadrotor_visualize(positions, orientations, delay, traj_step, l, cam_onboar
     # Animation
     plt.ion()
     fig.canvas.mpl_connect('key_release_event', lambda event: [exit(0) if event.key == "q" else None])
-    N = positions.shape[0]
     for k in range(N):
         x = positions[k]
         R = orientations[k]
         transformed_points = (R @ body_points.T).T + x[np.newaxis, :]
         pB, pM1, pM2, pM3, pM4 = transformed_points
         motor_coords = np.vstack([pM1, pM2, pM3, pM4])
+        if k >= N//4:
+            trace_positions.pop(0)
+        trace_positions.append(x)
+        trace_positions_array = np.array(trace_positions)
 
         # Clear and update world plot
         ax_world.cla()
@@ -64,9 +69,9 @@ def quadrotor_visualize(positions, orientations, delay, traj_step, l, cam_onboar
         ax_world.set_zlim(0., z_max + ax_world_margin)
         # ax_world.set_aspect("equal")
 
-        ax_world.scatter(*pB, c = 'k', s = 50, label = 'Body')
-        ax_world.scatter(motor_coords[:, 0], motor_coords[:, 1], motor_coords[:, 2],
-                         c = 'g', s = 50, label = 'Motors')
+        ax_world.scatter(trace_positions_array[:, 0], trace_positions_array[:, 1], trace_positions_array[:, 2], c = 'k', s = 20, label = 'trace')
+        ax_world.scatter(*pB, c = 'k', s = 50, label = 'body')
+        ax_world.scatter(motor_coords[:, 0], motor_coords[:, 1], motor_coords[:, 2], c = 'g', s = 50, label = 'motors')
 
         for i, pM in enumerate([pM1, pM2, pM3, pM4]):
             ax_world.plot([pB[0], pM[0]], [pB[1], pM[1]], [pB[2], pM[2]], 'r-', linewidth = 2)
@@ -91,9 +96,8 @@ def quadrotor_visualize(positions, orientations, delay, traj_step, l, cam_onboar
             quad_points = (R @ body_points.T).T + x[np.newaxis, :]
             pB_q, pM1_q, pM2_q, pM3_q, pM4_q = quad_points
             motor_coords_q = np.vstack([pM1_q, pM2_q, pM3_q, pM4_q])
-            ax_body.scatter(*pB_q, c = 'k', s = 50, label = 'Body')
-            ax_body.scatter(motor_coords_q[:, 0], motor_coords_q[:, 1], motor_coords_q[:, 2],
-                            c = 'g', s = 50, label = 'Motors')
+            ax_body.scatter(*pB_q, c = 'k', s = 50, label = 'body')
+            ax_body.scatter(motor_coords_q[:, 0], motor_coords_q[:, 1], motor_coords_q[:, 2], c = 'g', s = 50, label = 'motors')
 
             for i, pM in enumerate([pM1_q, pM2_q, pM3_q, pM4_q]):
                 ax_body.plot([pB_q[0], pM[0]], [pB_q[1], pM[1]], [pB_q[2], pM[2]], 'r-', linewidth = 2)
