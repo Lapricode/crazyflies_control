@@ -57,10 +57,11 @@ def param_deck_lighthouse(uri):
             print(f"[{uri}] Lighthouse deck NOT attached.")
     return callback
 
-def log_pos_callback(uri):
+def log_state_callback(uri):
     def callback(timestamp, data, logconf):
-        print(f"[t = {timestamp}]: [{uri}] -> x = {data['stateEstimate.x']:.3f}, "
-              f"y = {data['stateEstimate.y']:.3f}, z = {data['stateEstimate.z']:.3f}")
+        print(f"[t = {timestamp}]: [{uri}] ->", \
+                f"\n\t-> x = {data['stateEstimate.x']:.3f}, y = {data['stateEstimate.y']:.3f}, z = {data['stateEstimate.z']:.3f}", \
+                f"\n\t-> roll = {data['stabilizer.roll']:.3f}, pitch = {data['stabilizer.pitch']:.3f}, yaw = {data['stabilizer.yaw']:.3f}")
     return callback
 
 def init_logging(scf, uri):
@@ -69,14 +70,17 @@ def init_logging(scf, uri):
     #     print(f"[{uri}] ERROR: Lighthouse deck not found. Exiting.")
     #     return
 
-    log_conf = LogConfig(name = "position", period_in_ms = 1000)
-    log_conf.add_variable("stateEstimate.x", "float")
-    log_conf.add_variable("stateEstimate.y", "float")
-    log_conf.add_variable("stateEstimate.z", "float")
+    log_state = LogConfig(name = "state", period_in_ms = 100)
+    log_state.add_variable("stateEstimate.x", "float")
+    log_state.add_variable("stateEstimate.y", "float")
+    log_state.add_variable("stateEstimate.z", "float")
+    log_state.add_variable("stabilizer.roll", "float")
+    log_state.add_variable("stabilizer.pitch", "float")
+    log_state.add_variable("stabilizer.yaw", "float")
 
-    scf.cf.log.add_config(log_conf)
-    log_conf.data_received_cb.add_callback(log_pos_callback(uri))
-    log_conf.start()
+    scf.cf.log.add_config(log_state)
+    log_state.data_received_cb.add_callback(log_state_callback(uri))
+    log_state.start()
     while True:
         time.sleep(1)
     # log_conf.stop()
@@ -160,9 +164,9 @@ def init_cf(uri):
 def run_cf(uri):
     scf = init_cf(uri)
     threading.Thread(target = init_logging, args = (scf, uri), daemon = True).start()
-    fly(uri, scf)
+    # fly(uri, scf)
     print(f"[{uri}] -> Landing.")
-    time.sleep(3)
+    time.sleep(600)
     scf.close_link()
 
 
