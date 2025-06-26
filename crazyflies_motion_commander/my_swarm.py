@@ -1,22 +1,45 @@
 import logging
 import time
-import sys
-from threading import Event
-import cflib.crtp
+import threading
+from pynput import keyboard
+from cflib.crtp import init_drivers
 from cflib.crazyflie import Crazyflie
 from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
-from cflib.crazyflie.log import LogConfig
-from cflib.crazyflie.swarm import CachedCfFactory
-from cflib.crazyflie.swarm import Swarm
 from cflib.positioning.motion_commander import MotionCommander
+from cflib.crazyflie.log import LogConfig
 
 
-uris = {
-    "radio://0/20/2M/E7E7E7E701", \
-    "radio://0/20/2M/E7E7E7E702", \
-    "radio://0/20/2M/E7E7E7E703"
+uris_nums = {
+    "radio://0/20/2M/E7E7E7E701": 1, \
+    "radio://0/20/2M/E7E7E7E702": 2, \
+    "radio://0/20/2M/E7E7E7E703": 3
 }
-deck_attached_events = {uri: Event() for uri in uris}
+uris = list(uris_nums.keys())
+crazyflies = {}
+deck_attached_events = {uri: threading.Event() for uri in uris}
+crazyflie_controlled = 2
+pressed_keys = set()
+def on_press(key):
+    global crazyflie_controlled
+    try:
+        if key.char:
+            if key.char.isdigit():
+                crazyflie_controlled = int(key.char)
+            else:
+                pressed_keys.add(str(crazyflie_controlled) + key.char)
+    except AttributeError:
+        pass
+def on_release(key):
+    try:
+        if str(crazyflie_controlled) + key.char in pressed_keys:
+            pressed_keys.remove(str(crazyflie_controlled) + key.char)
+    except AttributeError:
+        pass
+listener = keyboard.Listener(on_press = on_press, on_release = on_release)
+listener.start()
+
+def limit_vel(vel, vel_min, vel_max):
+    return min(vel_max, max(vel_min, vel))
 
 def leds_check(scf):
     scf.cf.param.set_value("led.bitmask", 255)
@@ -36,17 +59,17 @@ def param_deck_lighthouse(uri):
 
 def log_pos_callback(uri):
     def callback(timestamp, data, logconf):
-        print(f"[{timestamp}] -> [{uri}]: x = {data['stateEstimate.x']:.3f}, "
+        print(f"[t = {timestamp}]: [{uri}] -> x = {data['stateEstimate.x']:.3f}, "
               f"y = {data['stateEstimate.y']:.3f}, z = {data['stateEstimate.z']:.3f}")
     return callback
 
 def init_logging(scf, uri):
-    scf.cf.param.add_update_callback(group = "deck", name = "bcLighthouse4", cb = param_deck_lighthouse(uri))
-    if not deck_attached_events[uri].wait(timeout = 5):
-        print(f"[{uri}] ERROR: Lighthouse deck not found. Exiting.")
-        return
+    # scf.cf.param.add_update_callback(group = "deck", name = "bcLighthouse4", cb = param_deck_lighthouse(uri))
+    # if not deck_attached_events[uri].wait(timeout = 5):
+    #     print(f"[{uri}] ERROR: Lighthouse deck not found. Exiting.")
+    #     return
 
-    log_conf = LogConfig(name = "position", period_in_ms = 100)
+    log_conf = LogConfig(name = "position", period_in_ms = 1000)
     log_conf.add_variable("stateEstimate.x", "float")
     log_conf.add_variable("stateEstimate.y", "float")
     log_conf.add_variable("stateEstimate.z", "float")
@@ -54,14 +77,62 @@ def init_logging(scf, uri):
     scf.cf.log.add_config(log_conf)
     log_conf.data_received_cb.add_callback(log_pos_callback(uri))
     log_conf.start()
+    while True:
+        time.sleep(1)
+    # log_conf.stop()
 
-    # Keep log running for 600 seconds (10 min)
-    time.sleep(600.0)
-    log_conf.stop()
-
-
-def move_linear_simple(scf):
+def fly(uri, scf):
     with MotionCommander(scf, default_height = 0.5) as mc:
+        print(f"[{uri}] -> Ready for command input ...")
+        time.sleep(5)
+        linear_vel = 0.1  # in meters/sec
+        angular_vel = 10  # in degrees/second
+        while True:
+            time.sleep(0.1)
+            if f"{uris_nums[uri]}w" in pressed_keys:
+                # print(f"[{uri}] -> Forward")
+                mc.start_forward(linear_vel)
+            elif f"{uris_nums[uri]}s" in pressed_keys:
+                # print(f"[{uri}] -> Back")
+                mc.start_back(linear_vel)
+            elif f"{uris_nums[uri]}a" in pressed_keys:
+                # print(f"[{uri}] -> Left")
+                mc.start_left(linear_vel)
+            elif f"{uris_nums[uri]}d" in pressed_keys:
+                # print(f"[{uri}] -> Right")
+                mc.start_right(linear_vel)
+            elif f"{uris_nums[uri]}i" in pressed_keys:
+                # print(f"[{uri}] -> Up")
+                mc.start_up(linear_vel)
+            elif f"{uris_nums[uri]}k" in pressed_keys:
+                # print(f"[{uri}] -> Down")
+                mc.start_down(linear_vel)
+            elif f"{uris_nums[uri]}j" in pressed_keys:
+                # print(f"[{uri}] -> Turn Left")
+                mc.start_turn_left(angular_vel)
+            elif f"{uris_nums[uri]}l" in pressed_keys:
+                # print(f"[{uri}] -> Turn Right")
+                mc.start_turn_right(angular_vel)
+            elif f"{uris_nums[uri]}q" in pressed_keys:
+                # print(f"[{uri}] -> Quit flying and landing.")
+                break
+            elif f"{uris_nums[uri]}v" in pressed_keys:
+                linear_vel += 0.05
+                angular_vel += 5
+                linear_vel = limit_vel(linear_vel, 0.1, 1.0)
+                angular_vel = limit_vel(angular_vel, 10, 90)
+            elif f"{uris_nums[uri]}c" in pressed_keys:
+                linear_vel -= 0.05
+                angular_vel -= 5
+                linear_vel = limit_vel(linear_vel, 0.1, 1.0)
+                angular_vel = limit_vel(angular_vel, 10, 90)
+            else:
+                # print(f"[{uri}] -> Stop and hover.")
+                mc.stop()
+
+def move_linear_simple(scf, name = ""):
+    with MotionCommander(scf, default_height = 0.5) as mc:
+        print(f"[{name}] -> Taking off and moving ...")
         # time.sleep(1)
         # mc.forward(0.5)
         # time.sleep(1)
@@ -76,18 +147,38 @@ def move_linear_simple(scf):
         time.sleep(1)
         mc.turn_right(180)
         time.sleep(3)
+        print(f"[{name}] -> Stopped moving.")
+
+def init_cf(uri):
+    scf = SyncCrazyflie(uri, cf = Crazyflie(rw_cache = "./cache"))
+    scf.open_link()
+    crazyflies[uri] = scf
+    leds_check(scf)
+    print(f"[{uri}] -> Connected!")
+    return scf
+
+def run_cf(uri):
+    scf = init_cf(uri)
+    threading.Thread(target = init_logging, args = (scf, uri), daemon = True).start()
+    fly(uri, scf)
+    print(f"[{uri}] -> Landing.")
+    time.sleep(3)
+    scf.close_link()
+
 
 if __name__ == "__main__":
     logging.basicConfig(level = logging.ERROR)
-    cflib.crtp.init_drivers()
-    factory = CachedCfFactory(rw_cache = "./cache")
-    with Swarm(uris, factory = factory) as swarm:
-        swarm.parallel_safe(leds_check)
-        # swarm.parallel_safe(init_logging)
-        for i in range(len(uris)):
-            move_linear_simple((swarm._cfs)[list(uris)[i]])
+    init_drivers()
+    threads = []
 
-    # with SyncCrazyflie(list(uris)[0], cf = Crazyflie(rw_cache = "./cache")) as scf:
+    for uri in uris:
+        t = threading.Thread(target = run_cf, args = (uri,))
+        threads.append(t)
+        t.start()
+    for t in threads:
+        t.join()
+
+    # with SyncCrazyflie(uris[0], cf = Crazyflie(rw_cache = "./cache")) as scf:
     #     scf.cf.param.add_update_callback(group = "deck", name = "bcLighthouse4", cb = param_deck_lighthouse)
         
     #     time.sleep(1)
@@ -99,7 +190,7 @@ if __name__ == "__main__":
     #     scf.cf.log.add_config(log_pos)
     #     log_pos.data_received_cb.add_callback(log_pos_callback)
         
-    #     if not deck_attached_event.wait(timeout = 5):
+    #     if not deck_attached_events.wait(timeout = 5):
     #         print("NO Lighthouse deck detected!")
     #         sys.exit(1)
         

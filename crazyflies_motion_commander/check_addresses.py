@@ -1,19 +1,9 @@
 import logging
 import time
-import sys
 import cflib.crtp
 from cflib.crazyflie import Crazyflie
 from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
-from cflib.crazyflie.log import LogConfig
 
-
-uris = [
-    "radio://0/20/2M/E7E7E7E701", \
-    "radio://0/20/2M/E7E7E7E702", \
-    "radio://0/20/2M/E7E7E7E703", \
-    "radio://0/20/2M/E7E7E7E704", \
-    "radio://0/20/2M/E7E7E7E705"
-]
 
 def leds_check(scf):
     try:
@@ -24,15 +14,14 @@ def leds_check(scf):
     except Exception as e:
         print(f"Error during LED check: {e}")
 
-
-if __name__ == "__main__":
+def detect_crazyflies(tested_uris):
     logging.basicConfig(level = logging.ERROR)
     cflib.crtp.init_drivers()
 
     working_uris = []
     failed_uris = []
 
-    for uri in uris:
+    for uri in tested_uris:
         try:
             print(f"Trying to connect to {uri} ...")
             with SyncCrazyflie(uri, cf = Crazyflie(rw_cache = "./rw_cache")) as scf:
@@ -50,3 +39,13 @@ if __name__ == "__main__":
     print("Failed URIs:")
     for uri in failed_uris:
         print(f"  ✖ {uri}")
+
+
+uris = [
+    "radio://0/20/2M/E7E7E7E701", \
+    "radio://0/20/2M/E7E7E7E702", \
+    "radio://0/20/2M/E7E7E7E703", \
+    "radio://0/20/2M/E7E7E7E704", \
+    "radio://0/20/2M/E7E7E7E705"
+]
+detect_crazyflies(uris)
