@@ -25,14 +25,18 @@ l = 0.045  # length of the quadrotor arm in m
 m = 0.032  # mass of the quadrotor in kg
 mb = 0.020  # mass of the quadrotor's body in kg
 mr = (m - mb) / 4.  # mass of each quadrotor's motor in kg
-Ixx = 2.*mr*l**2
-Iyy = 2.*mr*l**2
-Izz = 4.*mr*l**2
-Ixy = 0.0
-Iyz = 0.0
-Ixz = 0.0
-I = np.array([[Ixx, Ixy, Ixz], [Ixy, Iyy, Iyz], [Ixz, Iyz, Izz]])  # inertia matrix of the quadrotor in kg*m^2
+# Ixx = 2.*mr*l**2
+# Iyy = 2.*mr*l**2
+# Izz = 4.*mr*l**2
+# Ixy = 0.0
+# Iyz = 0.0
+# Ixz = 0.0
+# I = np.array([[Ixx, Ixy, Ixz], [Ixy, Iyy, Iyz], [Ixz, Iyz, Izz]])  # inertia matrix of the quadrotor in kg*m^2
+I = np.array([[16.6e-6, 0.83e-6, 0.72e-6], 
+                [0.83e-6, 16.6e-6, 1.8e-6],
+                [0.72e-6, 1.8e-6, 29.3e-6]])
 I_inv = np.linalg.inv(I)  # inverse of the inertia matrix
+body_yaw0 = -3/4 * np.pi  # assuming body_yaw0 is for the motor 1 at positive y direction, motor 2 at positive x direction and clockwise motor numbers
 Kf = 1e-2  # thrust coefficient in N/(rad/s)
 Kt = 1e-2  # torque coefficient in N*m/(rad/s)
 N = 12  # number of states in the quadrotor dynamics
@@ -49,7 +53,11 @@ def quadrotor_dynamics(x, u):
     rw_dot = Rwb @ vb  # linear velocity in the world frame
     Rwb_dot = Rwb @ SO3.hat(omegab)  # derivative of the rotation matrix of the body frame w.r.t. the world frame
     F_b = Rwb.T @ np.array([0, 0, -m * g]) + np.array([0, 0, Kf * np.sum(u)])  # force in the body frame
-    T_b = np.array([l * Kf * (u[0] -u[2]), l * Kf * (u[3] - u[1]), Kt * (u[0] + u[2] - u[1] - u[3])])  # torque in the body frame
+    T13 = l * Kf * (u[0] - u[2])
+    T42 = l * Kf * (u[3] - u[1])
+    T_b = np.array([T13 * np.cos(body_yaw0) - T42 * np.sin(body_yaw0), \
+                    T13 * np.sin(body_yaw0) + T42 * np.cos(body_yaw0), \
+                    Kt * (u[0] + u[2] - u[1] - u[3])])  # torque in the body frame
     vb_dot = 1/m * F_b - np.cross(omegab, vb)  # linear acceleration in the body frame
     omegab_dot = I_inv @ (T_b - np.cross(omegab, I @ omegab))  # angular acceleration in the body frame
     return rw_dot, Rwb_dot, vb_dot, omegab_dot
@@ -75,9 +83,9 @@ def quadrotor_dynamics_dx(x, u):
 
 def quadrotor_dynamics_du(x, u):
     B = np.zeros((N, M))
-    B[8, :] = np.array([Kf / m, Kf / m, Kf / m, Kf / m])
-    B[9:12, :] = I_inv @ np.array([[l * Kf, 0., -l*Kf, 0.], \
-                                    [0., -l*Kf, 0., l*Kf], \
+    B[8, :] = np.array([Kf/m, Kf/m, Kf/m, Kf/m])
+    B[9:12, :] = I_inv @ np.array([[l*Kf*np.cos(body_yaw0), l*Kf*np.sin(body_yaw0), -l*Kf*np.cos(body_yaw0), -l*Kf*np.sin(body_yaw0)], \
+                                    [l*Kf*np.sin(body_yaw0), -l*Kf*np.cos(body_yaw0), -l*Kf*np.sin(body_yaw0), l*Kf*np.cos(body_yaw0)], \
                                     [Kt, -Kt, Kt, -Kt]])
     # B[9:12, 0] = I_inv @ np.array([l * Kf, 0., Kt])
     # B[9:12, 1] = I_inv @ np.array([0., -l * Kf, -Kt])
@@ -121,9 +129,9 @@ def linearize_euler(x_bar, u_bar, dt):
     A[9:12, 9:12] = np.eye(3) - I_inv @ (omegab_hat @ I - SO3.vec_hat(I @ omegab)) * dt
 
     B = np.zeros((N, M))
-    B[8, :] = np.array([Kf / m, Kf / m, Kf / m, Kf / m]) * dt
-    B[9:12, :] = I_inv @ np.array([[l*Kf, 0., -l*Kf, 0.], \
-                                    [0., -l*Kf, 0., l*Kf], \
+    B[8, :] = np.array([Kf/m, Kf/m, Kf/m, Kf/m]) * dt
+    B[9:12, :] = I_inv @ np.array([[l*Kf*np.cos(body_yaw0), l*Kf*np.sin(body_yaw0), -l*Kf*np.cos(body_yaw0), -l*Kf*np.sin(body_yaw0)], \
+                                    [l*Kf*np.sin(body_yaw0), -l*Kf*np.cos(body_yaw0), -l*Kf*np.sin(body_yaw0), l*Kf*np.cos(body_yaw0)], \
                                     [Kt, -Kt, Kt, -Kt]]) * dt
     return A, B
 
@@ -234,33 +242,48 @@ def run_quadrotor_track_trajectory(x0, xk, u_bar, u_lim, Kc, dt, tf):
         x = euler(x, u, quadrotor_dynamics, dt)
     return positions, orientations
 
+def save_Kinf_mat(Kinf, file):
+    lines = []
+    for row in Kinf:
+        formatted_row = ", ".join(f"{val:.8e}f" for val in row)
+        lines.append(f"{{{formatted_row}}}")
+    cpp_struct_str = "static struct mat_4_12 Kinf = \n    {{\n"
+    cpp_struct_str += ",\n".join(f"      {line}" for line in lines)
+    cpp_struct_str += "\n    }};\n"
+    with open(file, "w") as f:
+        f.write(cpp_struct_str)
+    print(f"Kinf matrix saved to \"{file}\" in C-style struct format.")
 
-dt = 1e-2
-tf = 25
+
+dt = 1e-3
+tf = 10
 Q = 10. * np.eye(N)
 Qf = 10. * np.eye(N)
 R = 1. * np.eye(M)
+phi0 = 0.0
 x0 = np.array([0.0, 0.0, 0.0, \
-                1.0, 0.0, 0.0, 0.0, \
+                np.cos(phi0 / 2.), 0.0, 0.0, np.sin(phi0 / 2.), \
                 0.0, 0.0, 0.0, \
                 0.0, 0.0, 0.0])
 u_ref = m*g/4 / Kf * np.ones(4)  # hovering control input
 u_lim = 10. * (2. * np.pi) * np.ones(4)
 
-x_bar = np.block([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+phi_bar = 0.0
+x_bar = np.block([0.0, 0.0, 0.0, np.cos(phi_bar / 2.), 0.0, 0.0, np.sin(phi_bar / 2.), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 u_bar = np.copy(u_ref)
 A, B = linearize_euler(x_bar, u_bar, dt)
 Kinf = lqr(A, B, Q, Qf, R, round(tf / dt))
 print(f"Kinf: {np.round(Kinf, 5)}")
 r_ref = np.array([1.0, 1.0, 2.0])
-phi_ref = 0.0
+phi_ref = phi_bar
 q_ref = np.array([np.cos(phi_ref / 2.), 0.0, 0.0, np.sin(phi_ref / 2.)])
 x_ref = np.block([r_ref, \
                   q_ref, \
                   0.0, 0.0, 0.0, \
                   0.0, 0.0, 0.0])
 positions, orientations = run_quadrotor_regulate_configuration(x0, x_ref, u_bar, u_lim, Kinf, dt, tf)
-quadrotor_visualize(positions, orientations, 0.01, 10, 0.5, cam_onboard = False)
+save_Kinf_mat(Kinf, "Kinf.txt")
+quadrotor_visualize(positions, orientations, 0.01, int(1/(10*dt)), 0.5, body_yaw0, cam_onboard = False)
 
 # total_time_vec = np.arange(0, tf, dt)
 # tt = 1/10 * tf
@@ -290,4 +313,4 @@ quadrotor_visualize(positions, orientations, 0.01, 10, 0.5, cam_onboard = False)
 # positions = positions_1 + positions_2
 # orientations = orientations_1 + orientations_2
 
-# quadrotor_visualize(positions, orientations, 0.01, 10, 0.5, cam_onboard = False)
+# quadrotor_visualize(positions, orientations, 0.01, 10, 0.5, body_yaw0, cam_onboard = False)
