@@ -11,8 +11,11 @@ state:      x = [rw, qwb, vb, omegab] \in R^(13x1)
                     vb \in R^(3x1) is the linear velocity in the body frame
                     omegab \in R^(3x1) is the angular velocity in the body frame
 control:    u = [u1, u2, u3, u4] \in R^(4x1)
-            where u_i is the angular velocity of the i-th motor in rad/s
-
+            where u_i is the angular speed of the i-th motor in rad/s
+rotors:     Fi = Kf * ui^2
+            Ti = Kt * ui^2
+            where   Fi is the thrust force produced by the ith rotor
+                    Ti is the torque produced by the ith rotor
 note:   the state x comes with the quaternion qwb of the rotation matrix Rwb,
         but we use the rotation matrix Rwb directly for the dynamics and the jacobians calculations
         Rwb \in R^(3x3) is the rotation matrix of the body frame w.r.t. the world frame
@@ -22,9 +25,9 @@ note:   the state x comes with the quaternion qwb of the rotation matrix Rwb,
 
 g = 9.81  # acceleration due to gravity in m/s^2
 l = 0.045  # length of the quadrotor arm in m
-m = 0.032  # mass of the quadrotor in kg
-mb = 0.020  # mass of the quadrotor's body in kg
-mr = (m - mb) / 4.  # mass of each quadrotor's motor in kg
+m = 0.033  # mass of the quadrotor in kg
+# mb = 0.020  # mass of the quadrotor's body in kg
+# mr = (m - mb) / 4.  # mass of each quadrotor's motor in kg
 # Ixx = 2.*mr*l**2
 # Iyy = 2.*mr*l**2
 # Izz = 4.*mr*l**2
@@ -37,8 +40,9 @@ I = np.array([[16.6e-6, 0.83e-6, 0.72e-6],
                 [0.72e-6, 1.8e-6, 29.3e-6]])
 I_inv = np.linalg.inv(I)  # inverse of the inertia matrix
 body_yaw0 = -3/4 * np.pi  # assuming body_yaw0 is for the motor 1 at positive y direction, motor 2 at positive x direction and clockwise motor numbers
-Kf = 1e-2  # thrust coefficient in N/(rad/s)
-Kt = 1e-2  # torque coefficient in N*m/(rad/s)
+Kf = 9/4 * 1e-8  # thrust coefficient in N/(rad/s)^2
+Kt = 6e-3 * Kf  # torque coefficient in N*m/(rad/s)^2
+u_lim = 25000. * (2. * np.pi / 60) * np.ones(4)  # the control input limits in rad/sec
 N = 12  # number of states in the quadrotor dynamics
 M = 4  # number of inputs in the quadrotor dynamics
 
@@ -52,12 +56,12 @@ def quadrotor_dynamics(x, u):
     Rwb = S3.Rq_mat(qwb)  # rotation matrix of the body frame w.r.t. the world frame
     rw_dot = Rwb @ vb  # linear velocity in the world frame
     Rwb_dot = Rwb @ SO3.hat(omegab)  # derivative of the rotation matrix of the body frame w.r.t. the world frame
-    F_b = Rwb.T @ np.array([0, 0, -m * g]) + np.array([0, 0, Kf * np.sum(u)])  # force in the body frame
-    T13 = l * Kf * (u[0] - u[2])
-    T42 = l * Kf * (u[3] - u[1])
+    F_b = Rwb.T @ np.array([0, 0, -m * g]) + np.array([0, 0, Kf * np.sum(u**2)])  # force in the body frame
+    T13 = l * Kf * (u[0]**2 - u[2]**2)
+    T42 = l * Kf * (u[3]**2 - u[1]**2)
     T_b = np.array([T13 * np.cos(body_yaw0) - T42 * np.sin(body_yaw0), \
                     T13 * np.sin(body_yaw0) + T42 * np.cos(body_yaw0), \
-                    Kt * (u[0] + u[2] - u[1] - u[3])])  # torque in the body frame
+                    Kt * (u[0]**2 + u[2]**2 - u[1]**2 - u[3]**2)])  # torque in the body frame
     vb_dot = 1/m * F_b - np.cross(omegab, vb)  # linear acceleration in the body frame
     omegab_dot = I_inv @ (T_b - np.cross(omegab, I @ omegab))  # angular acceleration in the body frame
     return rw_dot, Rwb_dot, vb_dot, omegab_dot
@@ -83,14 +87,12 @@ def quadrotor_dynamics_dx(x, u):
 
 def quadrotor_dynamics_du(x, u):
     B = np.zeros((N, M))
-    B[8, :] = np.array([Kf/m, Kf/m, Kf/m, Kf/m])
-    B[9:12, :] = I_inv @ np.array([[l*Kf*np.cos(body_yaw0), l*Kf*np.sin(body_yaw0), -l*Kf*np.cos(body_yaw0), -l*Kf*np.sin(body_yaw0)], \
-                                    [l*Kf*np.sin(body_yaw0), -l*Kf*np.cos(body_yaw0), -l*Kf*np.sin(body_yaw0), l*Kf*np.cos(body_yaw0)], \
-                                    [Kt, -Kt, Kt, -Kt]])
-    # B[9:12, 0] = I_inv @ np.array([l * Kf, 0., Kt])
-    # B[9:12, 1] = I_inv @ np.array([0., -l * Kf, -Kt])
-    # B[9:12, 2] = I_inv @ np.array([-l * Kf, 0., Kt])
-    # B[9:12, 3] = I_inv @ np.array([0., l * Kf, -Kt])
+    B[8, :] = Kf/m * 2.*u
+    cos_comp = l*Kf * np.cos(body_yaw0)
+    sin_comp = l*Kf * np.sin(body_yaw0)
+    B[9:12, :] = I_inv @ np.array([[cos_comp * 2.*u[0], sin_comp * 2.*u[1], -cos_comp * 2.*u[2], -sin_comp * 2.*u[3]], \
+                                    [sin_comp * 2.*u[0], -cos_comp * 2.*u[1], -sin_comp * 2.*u[2], cos_comp * 2.*u[3]], \
+                                    [Kt * 2.*u[0], -Kt * 2.*u[1], Kt * 2.*u[2], -Kt * 2.*u[3]]])
     return B
 
 def euler(xk, uk, dynamics, dt):
@@ -129,10 +131,12 @@ def linearize_euler(x_bar, u_bar, dt):
     A[9:12, 9:12] = np.eye(3) - I_inv @ (omegab_hat @ I - SO3.vec_hat(I @ omegab)) * dt
 
     B = np.zeros((N, M))
-    B[8, :] = np.array([Kf/m, Kf/m, Kf/m, Kf/m]) * dt
-    B[9:12, :] = I_inv @ np.array([[l*Kf*np.cos(body_yaw0), l*Kf*np.sin(body_yaw0), -l*Kf*np.cos(body_yaw0), -l*Kf*np.sin(body_yaw0)], \
-                                    [l*Kf*np.sin(body_yaw0), -l*Kf*np.cos(body_yaw0), -l*Kf*np.sin(body_yaw0), l*Kf*np.cos(body_yaw0)], \
-                                    [Kt, -Kt, Kt, -Kt]]) * dt
+    B[8, :] = Kf/m * 2.*u_bar * dt
+    cos_comp = l*Kf * np.cos(body_yaw0)
+    sin_comp = l*Kf * np.sin(body_yaw0)
+    B[9:12, :] = I_inv @ np.array([[cos_comp * 2.*u_bar[0], sin_comp * 2.*u_bar[1], -cos_comp * 2.*u_bar[2], -sin_comp * 2.*u_bar[3]], \
+                                    [sin_comp * 2.*u_bar[0], -cos_comp * 2.*u_bar[1], -sin_comp * 2.*u_bar[2], cos_comp * 2.*u_bar[3]], \
+                                    [Kt * 2.*u_bar[0], -Kt * 2.*u_bar[1], Kt * 2.*u_bar[2], -Kt * 2.*u_bar[3]]]) * dt
     return A, B
 
 def runge_kutta_4th_order(xk, uk, dynamics, dt):
@@ -257,18 +261,17 @@ def save_Kinf_mat(Kinf, file):
 
 dt = 1e-3
 tf = 10
-Q = 10. * np.eye(N)
-Qf = 10. * np.eye(N)
-R = 1. * np.eye(M)
+Q = 1000. * np.eye(N)
+Qf = 1000. * np.eye(N)
+R = 0.001 * np.eye(M)
 phi0 = 0.0
 x0 = np.array([0.0, 0.0, 0.0, \
                 np.cos(phi0 / 2.), 0.0, 0.0, np.sin(phi0 / 2.), \
                 0.0, 0.0, 0.0, \
                 0.0, 0.0, 0.0])
-u_ref = m*g/4 / Kf * np.ones(4)  # hovering control input
-u_lim = 10. * (2. * np.pi) * np.ones(4)
+u_ref = np.sqrt(m*g/4 / Kf) * np.ones(4)  # hovering control input
 
-phi_bar = 0.0
+phi_bar = 0
 x_bar = np.block([0.0, 0.0, 0.0, np.cos(phi_bar / 2.), 0.0, 0.0, np.sin(phi_bar / 2.), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 u_bar = np.copy(u_ref)
 A, B = linearize_euler(x_bar, u_bar, dt)
