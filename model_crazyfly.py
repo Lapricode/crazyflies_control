@@ -271,13 +271,13 @@ x0 = np.array([0.0, 0.0, 0.0, \
                 0.0, 0.0, 0.0])
 u_ref = np.sqrt(m*g/4 / Kf) * np.ones(4)  # hovering control input
 
-phi_bar = 0
+phi_bar = 0.0
 x_bar = np.block([0.0, 0.0, 0.0, np.cos(phi_bar / 2.), 0.0, 0.0, np.sin(phi_bar / 2.), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 u_bar = np.copy(u_ref)
 A, B = linearize_euler(x_bar, u_bar, dt)
 Kinf = lqr(A, B, Q, Qf, R, round(tf / dt))
 print(f"Kinf: {np.round(Kinf, 5)}")
-r_ref = np.array([1.0, 1.0, 2.0])
+r_ref = np.array([1.0, 1.0, 1.0])
 phi_ref = phi_bar
 q_ref = np.array([np.cos(phi_ref / 2.), 0.0, 0.0, np.sin(phi_ref / 2.)])
 x_ref = np.block([r_ref, \
@@ -286,21 +286,22 @@ x_ref = np.block([r_ref, \
                   0.0, 0.0, 0.0])
 positions, orientations = run_quadrotor_regulate_configuration(x0, x_ref, u_bar, u_lim, Kinf, dt, tf)
 save_Kinf_mat(Kinf, "Kinf.txt")
-quadrotor_visualize(positions, orientations, 0.01, int(1/(10*dt)), 0.5, body_yaw0, cam_onboard = False)
+quadrotor_visualize(positions, orientations, 0.01, int(1/(10*dt)), 0.25, body_yaw0, cam_onboard = False)
 
 # total_time_vec = np.arange(0, tf, dt)
-# tt = 1/10 * tf
+# tt = 1/5 * tf
 # x_initial_traj = np.array([1.0, 2.0, 0.5, \
 #                             1.0, 0.0, 0.0, 0.0, \
 #                             0.0, 0.0, 0.0, \
 #                             0.0, 0.0, 0.0])
 # r = 1.0
-# freq = 0.05
+# freq_circle = 0.05
+# freq_bodyrot = freq_circle / 2
 # x_center = x_initial_traj[0] - r
 # y_center = x_initial_traj[1]
 # h = x_initial_traj[2]
-# xk_traj = [np.array([x_center + r * np.cos(2 * np.pi * freq * t), y_center + r * np.sin(2 * np.pi * freq * t), h, \
-#                     np.cos(((2 * np.pi * (freq / 2) * t) % (2 * np.pi)) / 2.), 0.0, 0.0, np.sin(((2 * np.pi * (freq / 2) * t) % (2 * np.pi)) / 2.), \
+# xk_traj = [np.array([x_center + r * np.cos(2 * np.pi * freq_circle * t), y_center + r * np.sin(2 * np.pi * freq_circle * t), h, \
+#                     np.cos(((2 * np.pi * freq_bodyrot * t) % (2 * np.pi)) / 2.), 0.0, 0.0, np.sin(((2 * np.pi * freq_bodyrot * t) % (2 * np.pi)) / 2.), \
 #                     0.0, 0.0, 0.0, \
 #                     0.0, 0.0, 0.0]) for t in np.arange(0, tf - tt, dt)]
 # uk_traj = len(total_time_vec) * [u_ref]
@@ -315,5 +316,4 @@ quadrotor_visualize(positions, orientations, 0.01, int(1/(10*dt)), 0.5, body_yaw
 # positions_2, orientations_2 = run_quadrotor_track_trajectory(x0_tt, xk_traj, u_ref, u_lim, Kc, dt, tf - tt)
 # positions = positions_1 + positions_2
 # orientations = orientations_1 + orientations_2
-
-# quadrotor_visualize(positions, orientations, 0.01, 10, 0.5, body_yaw0, cam_onboard = False)
+# quadrotor_visualize(positions, orientations, 0.01, int(1/(10*dt)), 0.5, body_yaw0, cam_onboard = False)
