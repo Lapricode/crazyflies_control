@@ -48,8 +48,6 @@
 #define ATTITUDE_UPDATE_DT (float)(1.0f / ATTITUDE_RATE)
 #define TOL 1e-6f
 
-static bool isInit = false;
-
 typedef struct mat_4_12_s
 {
   float m[4][12];
@@ -60,9 +58,13 @@ typedef struct mat_3_3_s
   float m[3][3];
 } mat_3_3_t; // 3x3 matrix
 
-typedef struct vec_3_s
+typedef union vec_3_u
 {
   float v[3];
+  struct
+  {
+    float x, y, z;
+  };
 } vec_3_t; // 3x1 column vector
 
 typedef struct vec_12_s
@@ -70,9 +72,13 @@ typedef struct vec_12_s
   float v[12];
 } vec_12_t; // 12x1 column vector
 
-typedef struct quat_s
+typedef union quat_u
 {
   float q[4];
+  struct
+  {
+    float w, x, y, z;
+  };
 } quat_t; // quaternion
 
 typedef struct cf_state_s
@@ -82,11 +88,6 @@ typedef struct cf_state_s
   vec_3_t vb; // linear velocity w.r.t body frame
   vec_3_t ob; // angular velocity w.r.t body frame
 } cf_state_t; // crazyflie's state structure
-
-// static mat_3_3_t CRAZYFLIE_INERTIA =
-//     {{{16.6e-6f, 0.83e-6f, 0.72e-6f},
-//       {0.83e-6f, 16.6e-6f, 1.8e-6f},
-//       {0.72e-6f, 1.8e-6f, 29.3e-6f}}};
 
 // define some logging variables
 static float posw_x;
@@ -105,16 +106,21 @@ static float velb_z;
 static float omegab_x;
 static float omegab_y;
 static float omegab_z;
-
-// // define LQR controller variables
-// static mat_4_12_t Kinf =
-//     {{{-4.05881016e+02f, 4.18693028e+02f, 4.98479582e+02f, -2.29752767e+03f, -2.22107965e+03f, 5.11762255e+02f, -5.90581176e+02f, 6.09658672e+02f, 5.87491481e+02f, -4.26743112e+02f, -4.11200457e+02f, 5.25880761e+02f},
-//       {3.99678379e+02f, 4.28156029e+02f, 4.98479582e+02f, -2.35582170e+03f, 2.18513105e+03f, -4.99573788e+02f, 5.81415635e+02f, 6.23872664e+02f, 5.87491481e+02f, -4.38998782e+02f, 4.04145594e+02f, -5.13823162e+02f},
-//       {4.45756152e+02f, -4.34418218e+02f, 4.98479582e+02f, 2.39209435e+03f, 2.46056279e+03f, 4.69481138e+02f, 6.50063668e+02f, -6.33124728e+02f, 5.87491481e+02f, 4.46113300e+02f, 4.60190785e+02f, 4.84057745e+02f},
-//       {-4.39553515e+02f, -4.12430839e+02f, 4.98479582e+02f, 2.26125502e+03f, -2.42461419e+03f, -4.81669605e+02f, -6.40898127e+02f, -6.00406609e+02f, 5.87491481e+02f, 4.19628594e+02f, -4.53135923e+02f, -4.96115344e+02f}}};
-// static float control_speed[4] = {0};
-// static float max_thrust = 0.156;    // the maximum thrust (in N) provided by one motor
 static int debug_print_counter = 0; // a counter for debug printings rate
+
+// define LQR controller variables
+static const mat_4_12_t Kinf = // the Kinf constant matrix of the LQR controller
+    {{{-4.05881016e+02f, 4.18693028e+02f, 4.98479582e+02f, -2.29752767e+03f, -2.22107965e+03f, 5.11762255e+02f, -5.90581176e+02f, 6.09658672e+02f, 5.87491481e+02f, -4.26743112e+02f, -4.11200457e+02f, 5.25880761e+02f},
+      {3.99678379e+02f, 4.28156029e+02f, 4.98479582e+02f, -2.35582170e+03f, 2.18513105e+03f, -4.99573788e+02f, 5.81415635e+02f, 6.23872664e+02f, 5.87491481e+02f, -4.38998782e+02f, 4.04145594e+02f, -5.13823162e+02f},
+      {4.45756152e+02f, -4.34418218e+02f, 4.98479582e+02f, 2.39209435e+03f, 2.46056279e+03f, 4.69481138e+02f, 6.50063668e+02f, -6.33124728e+02f, 5.87491481e+02f, 4.46113300e+02f, 4.60190785e+02f, 4.84057745e+02f},
+      {-4.39553515e+02f, -4.12430839e+02f, 4.98479582e+02f, 2.26125502e+03f, -2.42461419e+03f, -4.81669605e+02f, -6.40898127e+02f, -6.00406609e+02f, 5.87491481e+02f, 4.19628594e+02f, -4.53135923e+02f, -4.96115344e+02f}}};
+static const float max_thrust = 0.156; // the maximum thrust (in N) provided by only 1 motor
+static kf;
+static float control_speed[4] = {0}; // the controlled angular speeds of the 4 motors
+// static const mat_3_3_t CRAZYFLIE_INERTIA =
+//     {{{16.6e-6f, 0.83e-6f, 0.72e-6f},
+//       {0.83e-6f, 16.6e-6f, 1.8e-6f},
+//       {0.72e-6f, 1.8e-6f, 29.3e-6f}}};
 
 void appMain()
 {
@@ -142,7 +148,27 @@ void appMain()
 //   return result;
 // }
 
-mat_3_3_t Rq_mat(quat_t q)
+// convert roll, pitch, yaw angles to the corresponding quaternion
+quat_t qrpy_quat(vec_3_t rpy) // rpy carries the roll, pitch, and yaw angles in radians
+{
+  quat_t q;
+  float cr = cos(0.5f * rpy.x);
+  float sr = sin(0.5f * rpy.x);
+  float cp = cos(0.5f * rpy.y);
+  float sp = sin(0.5f * rpy.y);
+  float cy = cos(0.5f * rpy.z);
+  float sy = sin(0.5f * rpy.z);
+
+  q.q[0] = cr * cp * cy + sr * sp * sy;
+  q.q[1] = sr * cp * cy - cr * sp * sy;
+  q.q[2] = cr * sp * cy + sr * cp * sy;
+  q.q[3] = cr * cp * sy - sr * sp * cy;
+
+  return q;
+}
+
+// convert a quaternion to the corresponding rotation matrix
+mat_3_3_t Rq_mat(quat_t q) // q is the quaternion
 {
   mat_3_3_t R;
   float w = q.q[0], x = q.q[1], y = q.q[2], z = q.q[3];
@@ -162,7 +188,7 @@ mat_3_3_t Rq_mat(quat_t q)
   return R;
 }
 
-// Function to compute the transpose of a 3x3 matrix
+// compute the transpose of a 3x3 matrix
 static mat_3_3_t mat33_transpose(mat_3_3_t A)
 {
   mat_3_3_t At;
@@ -172,7 +198,7 @@ static mat_3_3_t mat33_transpose(mat_3_3_t A)
   return At;
 }
 
-// function to compute the product A * b, where A is a 3x3 matrix and b is a 3x1 column vector
+// compute the product A * b, where A is a 3x3 matrix and b is a 3x1 column vector
 static vec_3_t mat33_vec3_multiply(mat_3_3_t A, vec_3_t b)
 {
   vec_3_t result;
@@ -183,7 +209,7 @@ static vec_3_t mat33_vec3_multiply(mat_3_3_t A, vec_3_t b)
   return result;
 }
 
-// function to compute the product A * B, where A, B are 3x3 matrices
+// compute the product A * B, where A, B are 3x3 matrices
 static mat_3_3_t mat33_mat33_multiply(mat_3_3_t A, mat_3_3_t B)
 {
   mat_3_3_t result;
@@ -197,7 +223,7 @@ static mat_3_3_t mat33_mat33_multiply(mat_3_3_t A, mat_3_3_t B)
   return result;
 }
 
-// function to compute the right minus operator of the SO3 group
+// compute the right minus operator of the SO3 group
 static vec_3_t SO3_minus_right(mat_3_3_t R1, mat_3_3_t R2)
 {
   mat_3_3_t R_rel;
@@ -247,7 +273,7 @@ static vec_3_t SO3_minus_right(mat_3_3_t R1, mat_3_3_t R2)
   return result;
 }
 
-// function to compute the state error (state_current - state_reference)
+// compute the state error (state_current - state_reference)
 static vec_12_t compute_state_error(const cf_state_t state_cur, const cf_state_t state_ref)
 {
   vec_12_t error;
@@ -301,38 +327,42 @@ static vec_12_t compute_state_error(const cf_state_t state_cur, const cf_state_t
   return error;
 }
 
-void attitudeControlInit(const float updateDt)
-{
-  if (isInit)
-    return;
+// static bool isInit = false;
 
-  // add stuff here
+// void attitudeControlInit(const float updateDt)
+// {
+//   if (isInit)
+//     return;
 
-  isInit = true;
-}
+//   // add stuff here
 
-void positionControlInit(void)
-{
-  return;
-}
+//   isInit = true;
+// }
 
-bool attitudeControlTest()
-{
-  return isInit;
-}
+// void positionControlInit(void)
+// {
+//   return;
+// }
+
+// bool attitudeControlTest()
+// {
+//   return isInit;
+// }
 
 void controllerOutOfTreeInit(void)
 {
-  attitudeControlInit(ATTITUDE_UPDATE_DT);
-  positionControlInit();
-  return;
+  controllerPidInit();
+  // attitudeControlInit(ATTITUDE_UPDATE_DT);
+  // positionControlInit();
+  // return;
 }
 
 bool controllerOutOfTreeTest(void)
 {
-  bool pass = true;
-  pass &= attitudeControlTest();
-  return pass;
+  return controllerPidTest();
+  //   bool pass = true;
+  //   pass &= attitudeControlTest();
+  //   return pass;
 }
 
 void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
@@ -345,12 +375,13 @@ void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
   // PWM w.r.t. rotor speed (rad/sec):        PWM = -33333 + sqrt(1250 * omegar^2 + 11111*10^5)
   // thrust (N) w.r.t rotor_speed (rad/sec):  Fi = (9/4)*10^(-8) * ui^2
 
-  // controlModeForce for the control
-  control->controlMode = controlModeForce;
+  // // controlModeForce for the control
+  // control->controlMode = controlModeForce;
 
   // get the current state of the crazyflie
   vec_3_t vw_cur = {{state->velocity.x, state->velocity.y, state->velocity.z}};
   quat_t qwb_cur = {{state->attitudeQuaternion.w, state->attitudeQuaternion.x, state->attitudeQuaternion.y, state->attitudeQuaternion.z}};
+  vec_3_t rpyb_cur = {{radians(state->attitude.roll), -radians(state->attitude.pitch), radians(state->attitude.yaw)}};
   mat_3_3_t Rwb_cur = Rq_mat(qwb_cur);
   vec_3_t vb_cur = mat33_vec3_multiply(mat33_transpose(Rwb_cur), vw_cur);
   cf_state_t state_cur = {
@@ -361,28 +392,30 @@ void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
                state->attitudeQuaternion.x,
                state->attitudeQuaternion.y,
                state->attitudeQuaternion.z}},
-      .vb = {{vb_cur.v[0],
-              vb_cur.v[1],
-              vb_cur.v[2]}},
+      .vb = {{vb_cur.x,
+              vb_cur.y,
+              vb_cur.z}},
       .ob = {{radians(sensors->gyro.x),
               radians(sensors->gyro.y),
               radians(sensors->gyro.z)}},
   };
-  vec_3_t attb_cur = {{radians(state->attitude.roll), -radians(state->attitude.pitch), radians(state->attitude.yaw)}};
 
   // get the reference state of the crazyflie (in which state it should end up)
+  // vec_3_t rpyb_ref = {{radians(setpoint->attitude.roll), -radians(setpoint->attitude.pitch), radians(setpoint->attitude.yaw)}};
+  // quat_t qwb_ref = qrpy_quat(rpyb_ref);
+  vec_3_t rpyb_ref = {{0., 0., radians(setpoint->attitude.yaw)}};
+  quat_t qwb_ref = qrpy_quat(rpyb_ref);
   cf_state_t state_ref = {
       .rw = {{setpoint->position.x,
               setpoint->position.y,
               setpoint->position.z}},
-      .qwb = {{setpoint->attitudeQuaternion.w,
-               setpoint->attitudeQuaternion.x,
-               setpoint->attitudeQuaternion.y,
-               setpoint->attitudeQuaternion.z}},
+      .qwb = {{qwb_ref.w,
+               qwb_ref.x,
+               qwb_ref.y,
+               qwb_ref.z}},
       .vb = {{0.0, 0.0, 0.0}},
       .ob = {{0.0, 0.0, 0.0}},
   };
-  vec_3_t attb_ref = {{radians(setpoint->attitude.roll), -radians(setpoint->attitude.pitch), radians(setpoint->attitude.yaw)}};
 
   // create the control signal
   vec_12_t state_error = compute_state_error(state_cur, state_ref);
@@ -392,44 +425,45 @@ void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
   if (debug_print_counter % 500 == 0)
   {
     debug_print_counter = 0;
-    DEBUG_PRINT("Current state [%lu]: rw(m) = [%.3f, %.3f, %.3f],\t\t qwb = [%.3f, %.3f, %.3f, %.3f],\t\t attb(deg) = [%.3f, %.3f, %.3f],\n\t\t vb(m/s) = [%.3f, %.3f, %.3f],\t\t ob(deg/s) = [%.3f, %.3f, %.3f]\n",
+    DEBUG_PRINT("Current state [%lu]: rw(m) = [%.3f, %.3f, %.3f],\t\t qwb = [%.3f, %.3f, %.3f, %.3f],\t\t rpyb(deg) = [%.3f, %.3f, %.3f],\n\t\t vb(m/s) = [%.3f, %.3f, %.3f],\t\t ob(deg/s) = [%.3f, %.3f, %.3f]\n",
                 tick,
-                (double)state_cur.rw.v[0], (double)state_cur.rw.v[1], (double)state_cur.rw.v[2],
-                (double)state_cur.qwb.q[0], (double)state_cur.qwb.q[1], (double)state_cur.qwb.q[2], (double)state_cur.qwb.q[3],
-                (double)degrees(attb_cur.v[0]), (double)degrees(attb_cur.v[1]), (double)degrees(attb_cur.v[2]),
-                (double)state_cur.vb.v[0], (double)state_cur.vb.v[1], (double)state_cur.vb.v[2],
-                (double)degrees(state_cur.ob.v[0]), (double)degrees(state_cur.ob.v[1]), (double)degrees(state_cur.ob.v[2]));
-    DEBUG_PRINT("Reference state [%lu]: rw(m) = [%.3f, %.3f, %.3f],\t\t qwb = [%.3f, %.3f, %.3f, %.3f],\t\t attb(deg) = [%.3f, %.3f, %.3f]\n",
+                (double)state_cur.rw.x, (double)state_cur.rw.y, (double)state_cur.rw.z,
+                (double)state_cur.qwb.w, (double)state_cur.qwb.x, (double)state_cur.qwb.y, (double)state_cur.qwb.z,
+                (double)degrees(rpyb_cur.x), (double)degrees(rpyb_cur.y), (double)degrees(rpyb_cur.z),
+                (double)state_cur.vb.x, (double)state_cur.vb.y, (double)state_cur.vb.z,
+                (double)degrees(state_cur.ob.x), (double)degrees(state_cur.ob.y), (double)degrees(state_cur.ob.z));
+    DEBUG_PRINT("Reference state [%lu]: rw(m) = [%.3f, %.3f, %.3f],\t\t qwb = [%.3f, %.3f, %.3f, %.3f],\t\t rpyb(deg) = [%.3f, %.3f, %.3f]\n",
                 tick,
-                (double)state_cur.rw.v[0], (double)state_cur.rw.v[1], (double)state_cur.rw.v[2],
-                (double)state_ref.qwb.q[0], (double)state_ref.qwb.q[1], (double)state_ref.qwb.q[1], (double)state_ref.qwb.q[2],
-                (double)degrees(attb_ref.v[0]), (double)degrees(attb_ref.v[1]), (double)degrees(attb_ref.v[2]));
-    DEBUG_PRINT("State error [%lu]: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+                (double)state_ref.rw.x, (double)state_ref.rw.y, (double)state_ref.rw.z,
+                (double)state_ref.qwb.w, (double)state_ref.qwb.x, (double)state_ref.qwb.y, (double)state_ref.qwb.z,
+                (double)degrees(rpyb_ref.x), (double)degrees(rpyb_ref.y), (double)degrees(rpyb_ref.z));
+    DEBUG_PRINT("State error [%lu]: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]\n",
                 tick,
                 (double)state_error.v[0], (double)state_error.v[1], (double)state_error.v[2],
                 (double)state_error.v[3], (double)state_error.v[4], (double)state_error.v[5],
                 (double)state_error.v[6], (double)state_error.v[7], (double)state_error.v[8],
                 (double)state_error.v[9], (double)state_error.v[10], (double)state_error.v[11]);
+    DEBUG_PRINT("\n");
   }
   debug_print_counter += 1;
 
   // store data to the logging variables
-  posw_x = state_cur.rw.v[0];
-  posw_y = state_cur.rw.v[1];
-  posw_z = state_cur.rw.v[2];
-  qwb_w = state_cur.qwb.q[0];
-  qwb_x = state_cur.qwb.q[1];
-  qwb_y = state_cur.qwb.q[2];
-  qwb_z = state_cur.qwb.q[3];
-  roll = attb_cur.v[0];
-  pitch = attb_cur.v[1];
-  yaw = attb_cur.v[2];
-  velb_x = state_cur.vb.v[0];
-  velb_y = state_cur.vb.v[1];
-  velb_z = state_cur.vb.v[2];
-  omegab_x = state_cur.ob.v[0];
-  omegab_y = state_cur.ob.v[1];
-  omegab_z = state_cur.ob.v[2];
+  posw_x = state_cur.rw.x;
+  posw_y = state_cur.rw.y;
+  posw_z = state_cur.rw.z;
+  qwb_w = state_cur.qwb.w;
+  qwb_x = state_cur.qwb.x;
+  qwb_y = state_cur.qwb.y;
+  qwb_z = state_cur.qwb.z;
+  roll = rpyb_cur.x;
+  pitch = rpyb_cur.y;
+  yaw = rpyb_cur.z;
+  velb_x = state_cur.vb.x;
+  velb_y = state_cur.vb.y;
+  velb_z = state_cur.vb.z;
+  omegab_x = state_cur.ob.x;
+  omegab_y = state_cur.ob.y;
+  omegab_z = state_cur.ob.z;
 
   controllerPid(control, setpoint, sensors, state, tick);
 }
