@@ -10,7 +10,7 @@ from cflib.crazyflie.log import LogConfig
 from cflib.utils import uri_helper
 
 
-uri = uri_helper.uri_from_env(default = "radio://0/20/2M/E7E7E7E701")
+uri = uri_helper.uri_from_env(default = "radio://0/20/2M/E7E7E7E703")
 deck_attached_event = Event()
 
 DEFAULT_HEIGHT = 0.5
@@ -24,7 +24,7 @@ def log_pos_callback(timestamp, data, logconf):
     est_pos[0] = data["stateEstimate.x"]
     est_pos[1] = data["stateEstimate.y"]
 
-def param_deck_flow(name, value_str):
+def param_lighthouse_deck(name, value_str):
     value = int(value_str)
     print(value)
     if value:
@@ -83,7 +83,7 @@ def move_linear_simple(scf):
 if __name__ == "__main__":
     cflib.crtp.init_drivers()
     with SyncCrazyflie(uri, cf = Crazyflie(rw_cache = "./cache")) as scf:
-        scf.cf.param.add_update_callback(group = "deck", name = "bcLighthouse4", cb = param_deck_flow)
+        scf.cf.param.add_update_callback(group = "deck", name = "bcLighthouse4", cb = param_lighthouse_deck)
         
         time.sleep(1)
 
@@ -95,10 +95,10 @@ if __name__ == "__main__":
         logconf.data_received_cb.add_callback(log_pos_callback)
         
         if not deck_attached_event.wait(timeout = 5):
-            print("NO flowdeck detected!")
+            print("NO lighthouse deck detected!")
             sys.exit(1)
         
-        scf.cf.platform.send_arming_request(True)
+        # scf.cf.platform.send_arming_request(True)
         time.sleep(1.0)
         logconf.start()
         # take_off_simple(scf)

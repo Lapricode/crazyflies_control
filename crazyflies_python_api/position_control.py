@@ -22,7 +22,7 @@ def check_connection_leds_signal(scf):
     except Exception as e:
         print(f"Error during connection leds signal!: {e}")
 
-def check_lighthouse_deck():
+def check_lighthouse_deck(scf):
     # scf.cf.param.add_update_callback(group = "deck", name = "bcLighthouse4", cb = param_lighthouse_deck)
     lhdeck_value = scf.cf.param.get_value(complete_name = "deck.bcLighthouse4", timeout = 1)
     if int(lhdeck_value):
@@ -87,40 +87,54 @@ if __name__ == "__main__":
         print(f"Failed to connect to {uri}!: {e}")
         sys.exit(1)
 
-    # with PositionHlCommander(scf, default_height = 0.5) as pc:
-    with HighLevelCommander(scf) as hlc:
-        time.sleep(1)
+    default_height = 0.5  # in meters
+    hlc = HighLevelCommander(scf.cf)
+    # with PositionHlCommander(scf, default_height = default_height) as pc:
+    time.sleep(1)
 
-        log_battery = LogConfig(name = "Battery", period_in_ms = 1000)
-        log_battery.add_variable("pm.batteryLevel", "uint8_t")
-        scf.cf.log.add_config(log_battery)
-        log_battery.data_received_cb.add_callback(log_battery_callback(uri))
-        
-        log_motors = LogConfig(name = "Motors speed", period_in_ms = 100)
-        log_motors.add_variable("motor.m1", "uint16_t")
-        log_motors.add_variable("motor.m2", "uint16_t")
-        log_motors.add_variable("motor.m3", "uint16_t")
-        log_motors.add_variable("motor.m4", "uint16_t")
-        scf.cf.log.add_config(log_motors)
-        log_motors.data_received_cb.add_callback(log_motors_callback(uri))
+    log_battery = LogConfig(name = "Battery", period_in_ms = 1000)
+    log_battery.add_variable("pm.batteryLevel", "uint8_t")
+    scf.cf.log.add_config(log_battery)
+    log_battery.data_received_cb.add_callback(log_battery_callback(uri))
+    
+    log_motors = LogConfig(name = "Motors speed", period_in_ms = 100)
+    log_motors.add_variable("motor.m1", "uint16_t")
+    log_motors.add_variable("motor.m2", "uint16_t")
+    log_motors.add_variable("motor.m3", "uint16_t")
+    log_motors.add_variable("motor.m4", "uint16_t")
+    scf.cf.log.add_config(log_motors)
+    log_motors.data_received_cb.add_callback(log_motors_callback(uri))
 
-        log_battery.start()
-        log_motors.start()
-        
+    # log_battery.start()
+    # log_motors.start()
+    
+    takeoff_time = 2.0
+    land_time = 3.0
+    goto_time = 5.0
+    try:
+        hlc.takeoff(absolute_height_m = default_height, duration_s = takeoff_time)
+        time.sleep(takeoff_time)
         while True:
             time.sleep(1)
             xd, yd, zd, yawd, fly_target = create_target_position()
             if fly_target:
-                hlc.go_to(x = xd, y = yd, z = zd, yaw = np.deg2rad(yawd), duration_s = 5.0)
-                time.sleep(5.0)
+                hlc.go_to(x = xd, y = yd, z = zd, yaw = np.deg2rad(yawd), duration_s = goto_time)
+                time.sleep(goto_time)
                 # pc.go_to(x = xd, y = yd, z = zd, velocity = 0.1)
             else:
-                hlc.land(absolute_height_m = 0.0, duration_s = 5.0)
-                time.sleep(5.0)
+                hlc.land(absolute_height_m = 0.0, duration_s = land_time)
+                time.sleep(land_time)
                 break
+    finally:
+        try:
+            hlc.land(absolute_height_m = 0.0, duration_s = land_time)
+            time.sleep(land_time)
+        except:
+            pass
+        scf.close_link()
 
-        log_battery.stop()
-        log_motors.stop()
+    # log_battery.stop()
+    # log_motors.stop()
 
     scf.close_link()
 

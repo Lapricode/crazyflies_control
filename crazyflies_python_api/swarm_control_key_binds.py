@@ -7,13 +7,14 @@ from cflib.crazyflie import Crazyflie
 from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
 from cflib.positioning.motion_commander import MotionCommander
 from cflib.positioning.position_hl_commander import PositionHlCommander
+from cflib.crazyflie.high_level_commander import HighLevelCommander
 from cflib.crazyflie.log import LogConfig
 
 
 uris_nums = {
-    "radio://0/20/2M/E7E7E7E701": 1, \
+    # "radio://0/20/2M/E7E7E7E701": 1, \
     "radio://0/20/2M/E7E7E7E702": 2, \
-    "radio://0/20/2M/E7E7E7E703": 3
+    # "radio://0/20/2M/E7E7E7E703": 3
 }
 uris = list(uris_nums.keys())
 crazyflies = {}
@@ -48,28 +49,37 @@ def leds_check(scf):
     scf.cf.param.set_value("led.bitmask", 0)
     time.sleep(2)
 
-def param_deck_lighthouse(uri):
-    def callback(name, value_str):
-        value = int(value_str)
-        if value:
-            print(f"[{uri}] Lighthouse deck attached.")
-            deck_attached_events[uri].set()
-        else:
-            print(f"[{uri}] Lighthouse deck NOT attached.")
-    return callback
+# def param_deck_lighthouse(uri):
+#     print("here")
+#     def callback(name, value_str):
+#         value = int(value_str)
+#         print(value)
+#         if value:
+#             print(f"[{uri}] Lighthouse deck attached.")
+#             deck_attached_events[uri].set()
+#         else:
+#             print(f"[{uri}] Lighthouse deck NOT attached.")
+#     return callback
 
 def log_state_callback(uri):
     def callback(timestamp, data, logconf):
         print(f"[t = {timestamp}]: [{uri}] ->", \
                 f"\n\t-> x = {data['stateEstimate.x']:.3f}, y = {data['stateEstimate.y']:.3f}, z = {data['stateEstimate.z']:.3f}", \
-                f"\n\t-> roll = {data['stabilizer.roll']:.3f}, pitch = {data['stabilizer.pitch']:.3f}, yaw = {data['stabilizer.yaw']:.3f}")
+                f"\n\t-> roll = {data['stateEstimate.roll']:.3f}, pitch = {data['stateEstimate.pitch']:.3f}, yaw = {data['stateEstimate.yaw']:.3f}")
     return callback
 
 def init_logging(scf, uri):
-    scf.cf.param.add_update_callback(group = "deck", name = "bcLighthouse4", cb = param_deck_lighthouse(uri))
-    if not deck_attached_events[uri].wait(timeout = 5):
-        print(f"[{uri}] ERROR: Lighthouse deck not found. Exiting.")
+    lhdeck_value = scf.cf.param.get_value(complete_name = "deck.bcLighthouse4", timeout = 1)
+    if int(lhdeck_value):
+        print(f"[{uri}] -> Lighthouse deck attached!")
+        deck_attached_events[uri].set()
+    else:
+        print(f"[{uri}] -> Lighthouse deck NOT attached!")
         return
+    # scf.cf.param.add(group = "deck", name = "bcLighthouse4", cb = param_deck_lighthouse(uri))
+    # if not deck_attached_events[uri].wait(timeout = 5):
+    #     print(f"[{uri}] ERROR: Lighthouse deck not found. Exiting.")
+    #     return
 
     log_state = LogConfig(name = "state", period_in_ms = 100)
     log_state.add_variable("stateEstimate.x", "float")
@@ -86,61 +96,71 @@ def init_logging(scf, uri):
         time.sleep(1)
     log_state.stop()
 
-def fly(uri, scf):
-    with MotionCommander(scf, default_height = 0.5) as mc:
+def fly(scf, uri):
+    h = 0.5
+    # with PositionHlCommander(scf, default_height = h) as pc:
+    # with HighLevelCommander(scf) as hc:
+    with MotionCommander(scf, default_height = h) as mc:
         print(f"[{uri}] -> Ready for command input ...")
         time.sleep(5)
         linear_vel = 0.1  # in meters/sec
         angular_vel = 10  # in degrees/second
-        h = 0.5
+        flying = True
         while True:
             time.sleep(0.1)
-            if f"{uris_nums[uri]}w" in pressed_keys:
+            if f"{uris_nums[uri]}w" in pressed_keys and flying:
                 # print(f"[{uri}] -> Forward")
                 mc.start_forward(linear_vel)
-            elif f"{uris_nums[uri]}s" in pressed_keys:
+            elif f"{uris_nums[uri]}s" in pressed_keys and flying:
                 # print(f"[{uri}] -> Back")
                 mc.start_back(linear_vel)
-            elif f"{uris_nums[uri]}a" in pressed_keys:
+            elif f"{uris_nums[uri]}a" in pressed_keys and flying:
                 # print(f"[{uri}] -> Left")
                 mc.start_left(linear_vel)
-            elif f"{uris_nums[uri]}d" in pressed_keys:
+            elif f"{uris_nums[uri]}d" in pressed_keys and flying:
                 # print(f"[{uri}] -> Right")
                 mc.start_right(linear_vel)
-            elif f"{uris_nums[uri]}i" in pressed_keys:
+            elif f"{uris_nums[uri]}i" in pressed_keys and flying:
                 # print(f"[{uri}] -> Up")
                 mc.start_up(linear_vel)
-            elif f"{uris_nums[uri]}k" in pressed_keys:
+            elif f"{uris_nums[uri]}k" in pressed_keys and flying:
                 # print(f"[{uri}] -> Down")
                 mc.start_down(linear_vel)
-            elif f"{uris_nums[uri]}j" in pressed_keys:
+            elif f"{uris_nums[uri]}j" in pressed_keys and flying:
                 # print(f"[{uri}] -> Turn Left")
                 mc.start_turn_left(angular_vel)
-            elif f"{uris_nums[uri]}l" in pressed_keys:
+            elif f"{uris_nums[uri]}l" in pressed_keys and flying:
                 # print(f"[{uri}] -> Turn Right")
                 mc.start_turn_right(angular_vel)
-            elif f"{uris_nums[uri]}q" in pressed_keys:
-                # print(f"[{uri}] -> Quit flying and landing.")
-                break
-            elif f"{uris_nums[uri]}v" in pressed_keys:
+            elif f"{uris_nums[uri]}z" in pressed_keys and not flying:
+                # print(f"[{uri}] -> Take Off")
+                mc.take_off(0.5, 0.2)
+                flying = True
+            elif f"{uris_nums[uri]}x" in pressed_keys and flying:
+                # print(f"[{uri}] -> Land")
+                mc.land(0.2)
+                flying = False
+            elif f"{uris_nums[uri]}r" in pressed_keys and flying:
+                pass
+                # hc.go_to(0.0, 0.0, h, linear_vel)
+            elif f"{uris_nums[uri]}v" in pressed_keys and flying:
                 linear_vel += 0.05
                 angular_vel += 5
                 linear_vel = limit_vel(linear_vel, 0.1, 1.0)
                 angular_vel = limit_vel(angular_vel, 10, 90)
-            elif f"{uris_nums[uri]}c" in pressed_keys:
+            elif f"{uris_nums[uri]}c" in pressed_keys and flying:
                 linear_vel -= 0.05
                 angular_vel -= 5
                 linear_vel = limit_vel(linear_vel, 0.1, 1.0)
                 angular_vel = limit_vel(angular_vel, 10, 90)
-            elif f"{uris_nums[uri]}o" in pressed_keys:
-                # check ctrltarget
-                pass
-                # with PositionHlCommander(scf, x = 0.0, y = 0.0, z = h) as plc:
-                #     plc.go_to(0.0, 0.0, h)
-                #     plc.wait_completed()
-            else:
+            elif f"{uris_nums[uri]}q" in pressed_keys and flying:
+                # print(f"[{uri}] -> Quit flying and Land.")
+                break
+            elif flying:
                 # print(f"[{uri}] -> Stop and hover.")
                 mc.stop()
+            else:
+                pass
 
 def move_linear_simple(scf, name = ""):
     with MotionCommander(scf, default_height = 0.5) as mc:
@@ -172,9 +192,8 @@ def init_cf(uri):
 def run_cf(uri):
     scf = init_cf(uri)
     threading.Thread(target = init_logging, args = (scf, uri), daemon = True).start()
-    fly(uri, scf)
+    fly(scf, uri)
     print(f"[{uri}] -> Landing.")
-    time.sleep(600)
     scf.close_link()
 
 
