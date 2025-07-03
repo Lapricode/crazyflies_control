@@ -113,7 +113,7 @@ static float omegab_z;
 //       {4.45756152e+02f, -4.34418218e+02f, 4.98479582e+02f, 2.39209435e+03f, 2.46056279e+03f, 4.69481138e+02f, 6.50063668e+02f, -6.33124728e+02f, 5.87491481e+02f, 4.46113300e+02f, 4.60190785e+02f, 4.84057745e+02f},
 //       {-4.39553515e+02f, -4.12430839e+02f, 4.98479582e+02f, 2.26125502e+03f, -2.42461419e+03f, -4.81669605e+02f, -6.40898127e+02f, -6.00406609e+02f, 5.87491481e+02f, 4.19628594e+02f, -4.53135923e+02f, -4.96115344e+02f}}};
 // static float control_speed[4] = {0};
-static float max_thrust = 0.156;    // the maximum thrust (in N) provided by one motor
+// static float max_thrust = 0.156;    // the maximum thrust (in N) provided by one motor
 static int debug_print_counter = 0; // a counter for debug printings rate
 
 void appMain()
@@ -248,20 +248,20 @@ static vec_3_t SO3_minus_right(mat_3_3_t R1, mat_3_3_t R2)
 }
 
 // function to compute the state error (state_current - state_reference)
-static vec_12_t compute_state_error(const cf_state_t *state_cur, const cf_state_t *state_ref)
+static vec_12_t compute_state_error(const cf_state_t state_cur, const cf_state_t state_ref)
 {
   vec_12_t error;
 
   // Extract state components
-  vec_3_t rw_1 = state_cur->rw;
-  quat_t qwb_1 = state_cur->qwb;
-  vec_3_t vb_1 = state_cur->vb;
-  vec_3_t ob_1 = state_cur->ob;
+  vec_3_t rw_1 = state_cur.rw;
+  quat_t qwb_1 = state_cur.qwb;
+  vec_3_t vb_1 = state_cur.vb;
+  vec_3_t ob_1 = state_cur.ob;
 
-  vec_3_t rw_2 = state_ref->rw;
-  quat_t qwb_2 = state_ref->qwb;
-  vec_3_t vb_2 = state_ref->vb;
-  vec_3_t ob_2 = state_ref->ob;
+  vec_3_t rw_2 = state_ref.rw;
+  quat_t qwb_2 = state_ref.qwb;
+  vec_3_t vb_2 = state_ref.vb;
+  vec_3_t ob_2 = state_ref.ob;
 
   // Rotation matrices
   mat_3_3_t Rwb_1 = Rq_mat(qwb_1);
@@ -349,47 +349,49 @@ void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
   control->controlMode = controlModeForce;
 
   // get the current state of the crazyflie
-  vec_3_t vw_cur = {state->velocity.x, state->velocity.y, state->velocity.z};
-  quat_t qwb_cur = {state->attitudeQuaternion.w, state->attitudeQuaternion.x, state->attitudeQuaternion.y, state->attitudeQuaternion.z};
+  vec_3_t vw_cur = {{state->velocity.x, state->velocity.y, state->velocity.z}};
+  quat_t qwb_cur = {{state->attitudeQuaternion.w, state->attitudeQuaternion.x, state->attitudeQuaternion.y, state->attitudeQuaternion.z}};
   mat_3_3_t Rwb_cur = Rq_mat(qwb_cur);
   vec_3_t vb_cur = mat33_vec3_multiply(mat33_transpose(Rwb_cur), vw_cur);
   cf_state_t state_cur = {
-      .rw = {state->position.x,
-             state->position.y,
-             state->position.z},
-      .qwb = {state->attitudeQuaternion.w,
-              state->attitudeQuaternion.x,
-              state->attitudeQuaternion.y,
-              state->attitudeQuaternion.z},
-      .vb = {vb_cur.v[0],
-             vb_cur.v[1],
-             vb_cur.v[2]},
-      .ob = {radians(sensors->gyro.x),
-             radians(sensors->gyro.y),
-             radians(sensors->gyro.z)},
+      .rw = {{state->position.x,
+              state->position.y,
+              state->position.z}},
+      .qwb = {{state->attitudeQuaternion.w,
+               state->attitudeQuaternion.x,
+               state->attitudeQuaternion.y,
+               state->attitudeQuaternion.z}},
+      .vb = {{vb_cur.v[0],
+              vb_cur.v[1],
+              vb_cur.v[2]}},
+      .ob = {{radians(sensors->gyro.x),
+              radians(sensors->gyro.y),
+              radians(sensors->gyro.z)}},
   };
-  vec_3_t attb_cur = {radians(state->attitude.roll), -radians(state->attitude.pitch), radians(state->attitude.yaw)};
+  vec_3_t attb_cur = {{radians(state->attitude.roll), -radians(state->attitude.pitch), radians(state->attitude.yaw)}};
 
   // get the reference state of the crazyflie (in which state it should end up)
   cf_state_t state_ref = {
-      .rw = {setpoint->position.x,
-             setpoint->position.y,
-             setpoint->position.z},
-      .qwb = {setpoint->attitudeQuaternion.w,
-              setpoint->attitudeQuaternion.x,
-              setpoint->attitudeQuaternion.y,
-              setpoint->attitudeQuaternion.z},
-      .vb = {0.0, 0.0, 0.0},
-      .ob = {0.0, 0.0, 0.0},
+      .rw = {{setpoint->position.x,
+              setpoint->position.y,
+              setpoint->position.z}},
+      .qwb = {{setpoint->attitudeQuaternion.w,
+               setpoint->attitudeQuaternion.x,
+               setpoint->attitudeQuaternion.y,
+               setpoint->attitudeQuaternion.z}},
+      .vb = {{0.0, 0.0, 0.0}},
+      .ob = {{0.0, 0.0, 0.0}},
   };
-  vec_3_t attb_ref = {radians(setpoint->attitude.roll), -radians(setpoint->attitude.pitch), radians(setpoint->attitude.yaw)};
+  vec_3_t attb_ref = {{radians(setpoint->attitude.roll), -radians(setpoint->attitude.pitch), radians(setpoint->attitude.yaw)}};
 
-  // // create the control signal
+  // create the control signal
+  vec_12_t state_error = compute_state_error(state_cur, state_ref);
   // control->normalizedForces = ;
 
   // print some data for debugging
   if (debug_print_counter % 500 == 0)
   {
+    debug_print_counter = 0;
     DEBUG_PRINT("Current state [%lu]: rw(m) = [%.3f, %.3f, %.3f],\t\t qwb = [%.3f, %.3f, %.3f, %.3f],\t\t attb(deg) = [%.3f, %.3f, %.3f],\n\t\t vb(m/s) = [%.3f, %.3f, %.3f],\t\t ob(deg/s) = [%.3f, %.3f, %.3f]\n",
                 tick,
                 (double)state_cur.rw.v[0], (double)state_cur.rw.v[1], (double)state_cur.rw.v[2],
@@ -400,8 +402,14 @@ void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
     DEBUG_PRINT("Reference state [%lu]: rw(m) = [%.3f, %.3f, %.3f],\t\t qwb = [%.3f, %.3f, %.3f, %.3f],\t\t attb(deg) = [%.3f, %.3f, %.3f]\n",
                 tick,
                 (double)state_cur.rw.v[0], (double)state_cur.rw.v[1], (double)state_cur.rw.v[2],
-                (double)state_ref.qwb.q[0], (double)state_ref.qwb.q[1], (double)state_ref.qwb.q[1], (double)state_ref.qwb.q[2]);
-    debug_print_counter = 0;
+                (double)state_ref.qwb.q[0], (double)state_ref.qwb.q[1], (double)state_ref.qwb.q[1], (double)state_ref.qwb.q[2],
+                (double)degrees(attb_ref.v[0]), (double)degrees(attb_ref.v[1]), (double)degrees(attb_ref.v[2]));
+    DEBUG_PRINT("State error [%lu]: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+                tick,
+                (double)state_error.v[0], (double)state_error.v[1], (double)state_error.v[2],
+                (double)state_error.v[3], (double)state_error.v[4], (double)state_error.v[5],
+                (double)state_error.v[6], (double)state_error.v[7], (double)state_error.v[8],
+                (double)state_error.v[9], (double)state_error.v[10], (double)state_error.v[11]);
   }
   debug_print_counter += 1;
 
