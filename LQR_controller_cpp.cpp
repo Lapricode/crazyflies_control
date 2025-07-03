@@ -32,8 +32,8 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
-// #include "controller.h"
-// #include "controller_pid.h"
+#include "controller.h"
+#include "controller_pid.h"
 
 #include "log.h"
 #include "param.h"
@@ -63,10 +63,10 @@ typedef struct vec_12_s
 
 typedef struct my_state_s
 {
-  float rw[3];     // crazyflie's position w.r.t. world frame
-  float qwb[4];    // crazyflie's body orientation in quaternion form w.r.t. world frame
-  float vb[3];     // crazyflie's linear velocity w.r.t body frame
-  float omegab[3]; // crazyflie's angular velocity w.r.t body frame
+  float rw[3];  // crazyflie's position w.r.t. world frame
+  float qwb[4]; // crazyflie's body orientation in quaternion form w.r.t. world frame
+  float vb[3];  // crazyflie's linear velocity w.r.t body frame
+  float ob[3];  // crazyflie's angular velocity w.r.t body frame
 } my_state_t;
 
 // static mat_4_12_t Kinf =
@@ -80,8 +80,23 @@ typedef struct my_state_s
 //       {0.83e-6f, 16.6e-6f, 1.8e-6f},
 //       {0.72e-6f, 1.8e-6f, 29.3e-6f}}};
 
-// define some log variables
-static float posw;
+// define some logging variables
+static float posw_x;
+static float posw_y;
+static float posw_z;
+static float qwb_w;
+static float qwb_x;
+static float qwb_y;
+static float qwb_z;
+static float roll;
+static float pitch;
+static float yaw;
+static float velb_x;
+static float velb_y;
+static float velb_z;
+static float omegab_x;
+static float omegab_y;
+static float omegab_z;
 
 void appMain()
 {
@@ -201,12 +216,12 @@ vec_12_t compute_state_error(const my_state_t *state_cur, const my_state_t *stat
   const float *rw_1 = state_cur->rw;
   const float *qwb_1 = state_cur->qwb;
   const float *vb_1 = state_cur->vb;
-  const float *omegab_1 = state_cur->omegab;
+  const float *ob_1 = state_cur->ob;
 
   const float *rw_2 = state_ref->rw;
   const float *qwb_2 = state_ref->qwb;
   const float *vb_2 = state_ref->vb;
-  const float *omegab_2 = state_ref->omegab;
+  const float *ob_2 = state_ref->ob;
 
   // Rotation matrices
   struct mat33 Rwb_1 = Rq_mat(qwb_1);
@@ -228,10 +243,10 @@ vec_12_t compute_state_error(const my_state_t *state_cur, const my_state_t *stat
     vb_error[i] = vb_1[i] - vb_2[i];
   }
 
-  float omegab_error[3];
+  float ob_error[3];
   for (int i = 0; i < 3; i++)
   {
-    omegab_error[i] = omegab_1[i] - omegab_2[i];
+    ob_error[i] = ob_1[i] - ob_2[i];
   }
 
   // Concatenate into error vector
@@ -240,7 +255,7 @@ vec_12_t compute_state_error(const my_state_t *state_cur, const my_state_t *stat
     error.m[i] = rw_error[i];
     error.m[i + 3] = Rwb_error[i];
     error.m[i + 6] = vb_error[i];
-    error.m[i + 9] = omegab_error[i];
+    error.m[i + 9] = ob_error[i];
   }
 
   return error;
@@ -298,35 +313,112 @@ void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
                            state->attitudeQuaternion.x,
                            state->attitudeQuaternion.y,
                            state->attitudeQuaternion.z);
+  struct vec attb = mkvec(state->attitude.roll,
+                          state->attitude.pitch,
+                          state->attitude.yaw);
   struct vec vb = mkvec(state->velocity.x,
                         state->velocity.y,
                         state->velocity.z);
-  struct vec omegab = mkvec(radians(sensors->gyro.x),
-                            radians(sensors->gyro.y),
-                            radians(sensors->gyro.z));
+  struct vec ob = mkvec(radians(sensors->gyro.x),
+                        radians(sensors->gyro.y),
+                        radians(sensors->gyro.z));
   my_state_t state_cur = {
       .rw = {rw.x, rw.y, rw.z},
       .qwb = {qwb.w, qwb.x, qwb.y, qwb.z},
       .vb = {vb.x, vb.y, vb.z},
-      .omegab = {omegab.x, omegab.y, omegab.z},
+      .ob = {ob.x, ob.y, ob.z},
   };
 
-  DEBUG_PRINT("Current state: rw=[%.3f, %.3f, %.3f], qwb=[%.3f, %.3f, %.3f, %.3f], vb=[%.3f, %.3f, %.3f], omegab=[%.3f, %.3f, %.3f]\n",
+  DEBUG_PRINT("Current state: rw=[%.3f, %.3f, %.3f], qwb=[%.3f, %.3f, %.3f, %.3f], vb=[%.3f, %.3f, %.3f], ob=[%.3f, %.3f, %.3f]\n",
               (double)state_cur.rw[0], (double)state_cur.rw[1], (double)state_cur.rw[2],
               (double)state_cur.qwb[0], (double)state_cur.qwb[1], (double)state_cur.qwb[2], (double)state_cur.qwb[3],
               (double)state_cur.vb[0], (double)state_cur.vb[1], (double)state_cur.vb[2],
-              (double)state_cur.omegab[0], (double)state_cur.omegab[1], (double)state_cur.omegab[2]);
-  // controllerPid(control, setpoint, sensors, state, tick);
+              (double)state_cur.ob[0], (double)state_cur.ob[1], (double)state_cur.ob[2]);
+
+  // store data to the logging variables
+  posw_x = state_cur.rw[0];
+  posw_y = state_cur.rw[1];
+  posw_z = state_cur.rw[2];
+  qwb_w = state_cur.qwb[0];
+  qwb_x = state_cur.qwb[1];
+  qwb_y = state_cur.qwb[2];
+  qwb_z = state_cur.qwb[3];
+  roll = attb.x;
+  pitch = attb.y;
+  yaw = attb.z;
+  velb_x = state_cur.vb[0];
+  velb_y = state_cur.vb[1];
+  velb_z = state_cur.vb[2];
+  omegab_x = state_cur.ob[0];
+  omegab_y = state_cur.ob[1];
+  omegab_z = state_cur.ob[2];
+
+  controllerPid(control, setpoint, sensors, state, tick);
 }
 
 LOG_GROUP_START(LQRcontroller)
 /**
- * @brief Position w.r.t world frame
+ * @brief Position x (m) - world frame
  */
-LOG_ADD(LOG_FLOAT, posw, &posw)
+LOG_ADD(LOG_FLOAT, posw_x, &posw_x)
 /**
- * @brief Linear velocity w.r.t world frame
+ * @brief Position y (m) - world frame
  */
-// LOG_ADD(LOG)
+LOG_ADD(LOG_FLOAT, posw_y, &posw_y)
+/**
+ * @brief Position z (m) - world frame
+ */
+LOG_ADD(LOG_FLOAT, posw_z, &posw_z)
+/**
+ * @brief Body Quaternion w - world frame
+ */
+LOG_ADD(LOG_FLOAT, qwb_w, &qwb_w)
+/**
+ * @brief Body Quaternion x - world frame
+ */
+LOG_ADD(LOG_FLOAT, qwb_x, &qwb_x)
+/**
+ * @brief Body Quaternion y - world frame
+ */
+LOG_ADD(LOG_FLOAT, qwb_y, &qwb_y)
+/**
+ * @brief Body Quaternion z - world frame
+ */
+LOG_ADD(LOG_FLOAT, qwb_z, &qwb_z)
+/**
+ * @brief Roll angle (deg)
+ */
+LOG_ADD(LOG_FLOAT, roll, &roll)
+/**
+ * @brief Pitch angle (deg)
+ */
+LOG_ADD(LOG_FLOAT, pitch, &pitch)
+/**
+ * @brief Yaw angle (deg)
+ */
+LOG_ADD(LOG_FLOAT, yaw, &yaw)
+/**
+ * @brief Linear velocity x (m/s) - body frame
+ */
+LOG_ADD(LOG_FLOAT, velb_x, &velb_x)
+/**
+ * @brief Linear velocity y (m/s) - body frame
+ */
+LOG_ADD(LOG_FLOAT, velb_y, &velb_y)
+/**
+ * @brief Linear velocity z (m/s) - body frame
+ */
+LOG_ADD(LOG_FLOAT, velb_z, &velb_z)
+/**
+ * @brief Angular velocity x (deg/s) - body frame
+ */
+LOG_ADD(LOG_FLOAT, omegab_x, &omegab_x)
+/**
+ * @brief Angular velocity y (deg/s) - body frame
+ */
+LOG_ADD(LOG_FLOAT, omegab_y, &omegab_y)
+/**
+ * @brief Angular velocity z (deg/s) - body frame
+ */
+LOG_ADD(LOG_FLOAT, omegab_z, &omegab_z)
 LOG_GROUP_STOP(LQRcontroller)
-
