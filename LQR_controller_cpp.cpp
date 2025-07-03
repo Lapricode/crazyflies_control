@@ -69,12 +69,6 @@ typedef struct my_state_s
   float ob[3];  // crazyflie's angular velocity w.r.t body frame
 } my_state_t;
 
-// static mat_4_12_t Kinf =
-//     {{{-4.05881016e+02f, 4.18693028e+02f, 4.98479582e+02f, -2.29752767e+03f, -2.22107965e+03f, 5.11762255e+02f, -5.90581176e+02f, 6.09658672e+02f, 5.87491481e+02f, -4.26743112e+02f, -4.11200457e+02f, 5.25880761e+02f},
-//       {3.99678379e+02f, 4.28156029e+02f, 4.98479582e+02f, -2.35582170e+03f, 2.18513105e+03f, -4.99573788e+02f, 5.81415635e+02f, 6.23872664e+02f, 5.87491481e+02f, -4.38998782e+02f, 4.04145594e+02f, -5.13823162e+02f},
-//       {4.45756152e+02f, -4.34418218e+02f, 4.98479582e+02f, 2.39209435e+03f, 2.46056279e+03f, 4.69481138e+02f, 6.50063668e+02f, -6.33124728e+02f, 5.87491481e+02f, 4.46113300e+02f, 4.60190785e+02f, 4.84057745e+02f},
-//       {-4.39553515e+02f, -4.12430839e+02f, 4.98479582e+02f, 2.26125502e+03f, -2.42461419e+03f, -4.81669605e+02f, -6.40898127e+02f, -6.00406609e+02f, 5.87491481e+02f, 4.19628594e+02f, -4.53135923e+02f, -4.96115344e+02f}}};
-
 // static struct mat33 CRAZYFLIE_INERTIA =
 //     {{{16.6e-6f, 0.83e-6f, 0.72e-6f},
 //       {0.83e-6f, 16.6e-6f, 1.8e-6f},
@@ -98,6 +92,16 @@ static float omegab_x;
 static float omegab_y;
 static float omegab_z;
 
+// // define LQR controller variables
+// static mat_4_12_t Kinf =
+//     {{{-4.05881016e+02f, 4.18693028e+02f, 4.98479582e+02f, -2.29752767e+03f, -2.22107965e+03f, 5.11762255e+02f, -5.90581176e+02f, 6.09658672e+02f, 5.87491481e+02f, -4.26743112e+02f, -4.11200457e+02f, 5.25880761e+02f},
+//       {3.99678379e+02f, 4.28156029e+02f, 4.98479582e+02f, -2.35582170e+03f, 2.18513105e+03f, -4.99573788e+02f, 5.81415635e+02f, 6.23872664e+02f, 5.87491481e+02f, -4.38998782e+02f, 4.04145594e+02f, -5.13823162e+02f},
+//       {4.45756152e+02f, -4.34418218e+02f, 4.98479582e+02f, 2.39209435e+03f, 2.46056279e+03f, 4.69481138e+02f, 6.50063668e+02f, -6.33124728e+02f, 5.87491481e+02f, 4.46113300e+02f, 4.60190785e+02f, 4.84057745e+02f},
+//       {-4.39553515e+02f, -4.12430839e+02f, 4.98479582e+02f, 2.26125502e+03f, -2.42461419e+03f, -4.81669605e+02f, -6.40898127e+02f, -6.00406609e+02f, 5.87491481e+02f, 4.19628594e+02f, -4.53135923e+02f, -4.96115344e+02f}}};
+// static float control_speed[4] = {0};
+static float max_thrust = 0.156;    // the maximum thrust (in N) provided by one motor
+static int debug_print_counter = 0; // a counter for debug printings rate
+
 void appMain()
 {
   DEBUG_PRINT("Waiting for activation ...\n");
@@ -106,7 +110,7 @@ void appMain()
   {
     vTaskDelay(M2T(2000));
 
-    DEBUG_PRINT("My LQR Controller!\n");
+    // DEBUG_PRINT("My LQR Controller!\n");
   }
 }
 
@@ -144,29 +148,37 @@ struct mat33 Rq_mat(const float q[4])
   return R;
 }
 
-float trace_mat33(struct mat33 R)
+// Function to compute the transpose of a 3x3 matrix
+static struct mat33 mat33_transpose(struct mat33 A)
 {
-  return R.m[0][0] + R.m[1][1] + R.m[2][2];
+  struct mat33 At;
+  for (int i = 0; i < 3; ++i)
+    for (int j = 0; j < 3; ++j)
+      At.m[i][j] = A.m[j][i];
+  return At;
 }
 
-void mat33_transpose_mul(struct mat33 A, struct mat33 B, struct mat33 *result)
+// function to compute the product A * B, with A, B being 3x3 matrices
+static struct mat33 mat33_multiply(struct mat33 A, struct mat33 B)
 {
-  // result = Bᵀ * A
+  struct mat33 result;
   for (int i = 0; i < 3; ++i)
     for (int j = 0; j < 3; ++j)
     {
-      result->m[i][j] = 0.0f;
+      result.m[i][j] = 0.0f;
       for (int k = 0; k < 3; ++k)
-        result->m[i][j] += B.m[k][i] * A.m[k][j];
+        result.m[i][j] += A.m[i][k] * B.m[k][j];
     }
+  return result;
 }
 
-void SO3_minus_right(struct mat33 R1, struct mat33 R2, float out[3])
+// function to compute
+static void SO3_minus_right(struct mat33 R1, struct mat33 R2, float out[3])
 {
   struct mat33 R_rel;
-  mat33_transpose_mul(R1, R2, &R_rel); // R_rel = R2ᵀ * R1
+  R_rel = mat33_multiply(mat33_transpose(R2), R1); // R_rel = R2ᵀ * R1
 
-  float tr = trace_mat33(R_rel);
+  float tr = R_rel.m[0][0] + R_rel.m[1][1] + R_rel.m[2][2];
   float cos_theta = (tr - 1.0f) / 2.0f;
   if (cos_theta > 1.0f)
     cos_theta = 1.0f;
@@ -208,7 +220,7 @@ void SO3_minus_right(struct mat33 R1, struct mat33 R2, float out[3])
   }
 }
 
-vec_12_t compute_state_error(const my_state_t *state_cur, const my_state_t *state_ref)
+static vec_12_t compute_state_error(const my_state_t *state_cur, const my_state_t *state_ref)
 {
   vec_12_t error;
 
@@ -300,40 +312,83 @@ void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
                          const state_t *state,
                          const stabilizerStep_t tick)
 {
-  // rotor speed (rad/sec) w.r.t. PWM: sqrt(8e-4f * x^2 + 53.33 * x)
-  // PWM w.r.t. rotor speed (rad/sec): -33333 + sqrt(1250 * x^2 + 11111*10^5)
+  // This loop runs at approximately 1000 Hz rate.
+  // rotor speed (rad/sec) w.r.t. PWM:        omegar = sqrt(8e-4f * PWM^2 + 53.33 * PWM)
+  // PWM w.r.t. rotor speed (rad/sec):        PWM = -33333 + sqrt(1250 * omegar^2 + 11111*10^5)
+  // thrust (N) w.r.t rotor_speed (rad/sec):  Fi = (9/4)*10^(-8) * ui^2
 
   // controlModeForce for the control
   control->controlMode = controlModeForce;
 
-  struct vec rw = mkvec(state->position.x,
-                        state->position.y,
-                        state->position.z);
-  struct quat qwb = mkquat(state->attitudeQuaternion.w,
-                           state->attitudeQuaternion.x,
-                           state->attitudeQuaternion.y,
-                           state->attitudeQuaternion.z);
-  struct vec attb = mkvec(state->attitude.roll,
-                          state->attitude.pitch,
-                          state->attitude.yaw);
-  struct vec vb = mkvec(state->velocity.x,
-                        state->velocity.y,
-                        state->velocity.z);
-  struct vec ob = mkvec(radians(sensors->gyro.x),
-                        radians(sensors->gyro.y),
-                        radians(sensors->gyro.z));
+  // // get the current state of the crazyflie
+  // struct vec rw = mkvec(state->position.x,
+  //                       state->position.y,
+  //                       state->position.z);
+  // struct quat qwb = mkquat(state->attitudeQuaternion.x,
+  //                          state->attitudeQuaternion.y,
+  //                          state->attitudeQuaternion.z,
+  //                          state->attitudeQuaternion.w);
+  // struct vec vb = mkvec(state->velocity.x,
+  //                       state->velocity.y,
+  //                       state->velocity.z);
+  // struct vec ob = mkvec(radians(sensors->gyro.x),
+  //                       radians(sensors->gyro.y),
+  //                       radians(sensors->gyro.z));
   my_state_t state_cur = {
-      .rw = {rw.x, rw.y, rw.z},
-      .qwb = {qwb.w, qwb.x, qwb.y, qwb.z},
-      .vb = {vb.x, vb.y, vb.z},
-      .ob = {ob.x, ob.y, ob.z},
+      .rw = {state->position.x,
+             state->position.y,
+             state->position.z},
+      .qwb = {state->attitudeQuaternion.w,
+              state->attitudeQuaternion.x,
+              state->attitudeQuaternion.y,
+              state->attitudeQuaternion.z},
+      .vb = {state->velocity.x,
+             state->velocity.y,
+             state->velocity.z},
+      .ob = {radians(sensors->gyro.x),
+             radians(sensors->gyro.y),
+             radians(sensors->gyro.z)},
   };
+  struct vec attb_cur = mkvec(radians(state->attitude.roll),
+                              -radians(state->attitude.pitch),
+                              radians(state->attitude.yaw));
 
-  DEBUG_PRINT("Current state: rw=[%.3f, %.3f, %.3f], qwb=[%.3f, %.3f, %.3f, %.3f], vb=[%.3f, %.3f, %.3f], ob=[%.3f, %.3f, %.3f]\n",
-              (double)state_cur.rw[0], (double)state_cur.rw[1], (double)state_cur.rw[2],
-              (double)state_cur.qwb[0], (double)state_cur.qwb[1], (double)state_cur.qwb[2], (double)state_cur.qwb[3],
-              (double)state_cur.vb[0], (double)state_cur.vb[1], (double)state_cur.vb[2],
-              (double)state_cur.ob[0], (double)state_cur.ob[1], (double)state_cur.ob[2]);
+  // get the reference state of the crazyflie (in which state it should end up)
+  my_state_t state_ref = {
+      .rw = {setpoint->position.x,
+             setpoint->position.y,
+             setpoint->position.z},
+      .qwb = {setpoint->attitudeQuaternion.w,
+              setpoint->attitudeQuaternion.x,
+              setpoint->attitudeQuaternion.y,
+              setpoint->attitudeQuaternion.z},
+      .vb = {0.0, 0.0, 0.0},
+      .ob = {0.0, 0.0, 0.0},
+  };
+  struct vec attb_cur = mkvec(radians(setpoint->attitude.roll),
+                              -radians(setpoint->attitude.pitch),
+                              radians(setpoint->attitude.yaw));
+
+  // // create the control signal
+  // control->normalizedForces = ;
+
+  // print some data for debugging
+  if (debug_print_counter % 500 == 0)
+  {
+    DEBUG_PRINT("Current state [%lu]: rw(m) = [%.3f, %.3f, %.3f],\t\t qwb = [%.3f, %.3f, %.3f, %.3f],\t\t attb(deg) = [%.3f, %.3f, %.3f],\n\t\t vb(m/s) = [%.3f, %.3f, %.3f],\t\t ob(deg/s) = [%.3f, %.3f, %.3f]\n",
+                tick,
+                (double)state_cur.rw[0], (double)state_cur.rw[1], (double)state_cur.rw[2],
+                (double)state_cur.qwb[0], (double)state_cur.qwb[1], (double)state_cur.qwb[2], (double)state_cur.qwb[3],
+                (double)degrees(attb_cur.x), (double)degrees(attb_cur.y), (double)degrees(attb_cur.z),
+                (double)state_cur.vb[0], (double)state_cur.vb[1], (double)state_cur.vb[2],
+                (double)degrees(state_cur.ob[0]), (double)degrees(state_cur.ob[1]), (double)degrees(state_cur.ob[2]));
+    DEBUG_PRINT("Reference state [%lu]: rw(m) = [%.3f, %.3f, %.3f],\t\t qwb = [%.3f, %.3f, %.3f, %.3f],\t\t attb(deg) = [%.3f, %.3f, %.3f]\n",
+                tick,
+                (double)state_cur.rw[0], (double)state_cur.rw[1], (double)state_cur.rw[2],
+                (double)state_ref.qwb[0], (double)state_ref.qwb[1], (double)state_ref.qwb[1], (double)state_ref.qwb[2]);
+    debug_print_counter = 0;
+  }
+  debug_print_counter += 1;
 
   // store data to the logging variables
   posw_x = state_cur.rw[0];
@@ -343,9 +398,9 @@ void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
   qwb_x = state_cur.qwb[1];
   qwb_y = state_cur.qwb[2];
   qwb_z = state_cur.qwb[3];
-  roll = attb.x;
-  pitch = attb.y;
-  yaw = attb.z;
+  roll = attb_cur.x;
+  pitch = attb_cur.y;
+  yaw = attb_cur.z;
   velb_x = state_cur.vb[0];
   velb_y = state_cur.vb[1];
   velb_z = state_cur.vb[2];
