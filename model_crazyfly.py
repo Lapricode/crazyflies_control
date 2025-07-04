@@ -16,6 +16,9 @@ rotors:     Fi = Kf * ui^2
             Ti = Kt * ui^2
             where   Fi is the thrust force produced by the ith rotor
                     Ti is the torque produced by the ith rotor
+            the motors are numbered in a clockwise manner, with motor 4 being in xy direction
+            the rotors 1, 3 rotate counter-clockwise, and the rotors 2, 4 rotate clockwise
+            the motor arms form right angles (90 degrees) with each other
 note:   the state x comes with the quaternion qwb of the rotation matrix Rwb,
         but we use the rotation matrix Rwb directly for the dynamics and the jacobians calculations
         Rwb \in R^(3x3) is the rotation matrix of the body frame w.r.t. the world frame
@@ -24,7 +27,7 @@ note:   the state x comes with the quaternion qwb of the rotation matrix Rwb,
 
 
 g = 9.81  # acceleration due to gravity in m/s^2
-l = 0.045  # length of the quadrotor arm in m
+l = 0.046  # length of the quadrotor arm in m
 m = 0.033  # mass of the quadrotor in kg
 # mb = 0.020  # mass of the quadrotor's body in kg
 # mr = (m - mb) / 4.  # mass of each quadrotor's motor in kg
@@ -41,7 +44,7 @@ I = np.array([[16.6e-6, 0.83e-6, 0.72e-6],
 I_inv = np.linalg.inv(I)  # inverse of the inertia matrix
 body_yaw0 = -3/4 * np.pi  # assuming body_yaw0 is for the motor 1 at positive y direction, motor 2 at positive x direction and clockwise motor numbers
 Kf = 9/4 * 1e-8  # thrust coefficient in N/(rad/s)^2
-Kt = 6e-3 * Kf  # torque coefficient in N*m/(rad/s)^2
+Kt = 0.00596 * Kf  # torque coefficient in N*m/(rad/s)^2
 u_lim = 25000. * (2. * np.pi / 60) * np.ones(4)  # the control input limits in rad/sec
 N = 12  # number of states in the quadrotor dynamics
 M = 4  # number of inputs in the quadrotor dynamics
@@ -61,7 +64,7 @@ def quadrotor_dynamics(x, u):
     T42 = l * Kf * (u[3]**2 - u[1]**2)
     T_b = np.array([T13 * np.cos(body_yaw0) - T42 * np.sin(body_yaw0), \
                     T13 * np.sin(body_yaw0) + T42 * np.cos(body_yaw0), \
-                    Kt * (u[0]**2 + u[2]**2 - u[1]**2 - u[3]**2)])  # torque in the body frame
+                    Kt * (-u[0]**2 - u[2]**2 + u[1]**2 + u[3]**2)])  # torque in the body frame
     vb_dot = 1/m * F_b - np.cross(omegab, vb)  # linear acceleration in the body frame
     omegab_dot = I_inv @ (T_b - np.cross(omegab, I @ omegab))  # angular acceleration in the body frame
     return rw_dot, Rwb_dot, vb_dot, omegab_dot
@@ -92,7 +95,7 @@ def quadrotor_dynamics_du(x, u):
     sin_comp = l*Kf * np.sin(body_yaw0)
     B[9:12, :] = I_inv @ np.array([[cos_comp * 2.*u[0], sin_comp * 2.*u[1], -cos_comp * 2.*u[2], -sin_comp * 2.*u[3]], \
                                     [sin_comp * 2.*u[0], -cos_comp * 2.*u[1], -sin_comp * 2.*u[2], cos_comp * 2.*u[3]], \
-                                    [Kt * 2.*u[0], -Kt * 2.*u[1], Kt * 2.*u[2], -Kt * 2.*u[3]]])
+                                    [-Kt * 2.*u[0], Kt * 2.*u[1], -Kt * 2.*u[2], Kt * 2.*u[3]]])
     return B
 
 def euler(xk, uk, dynamics, dt):
@@ -136,7 +139,7 @@ def linearize_euler(x_bar, u_bar, dt):
     sin_comp = l*Kf * np.sin(body_yaw0)
     B[9:12, :] = I_inv @ np.array([[cos_comp * 2.*u_bar[0], sin_comp * 2.*u_bar[1], -cos_comp * 2.*u_bar[2], -sin_comp * 2.*u_bar[3]], \
                                     [sin_comp * 2.*u_bar[0], -cos_comp * 2.*u_bar[1], -sin_comp * 2.*u_bar[2], cos_comp * 2.*u_bar[3]], \
-                                    [Kt * 2.*u_bar[0], -Kt * 2.*u_bar[1], Kt * 2.*u_bar[2], -Kt * 2.*u_bar[3]]]) * dt
+                                    [-Kt * 2.*u_bar[0], Kt * 2.*u_bar[1], -Kt * 2.*u_bar[2], Kt * 2.*u_bar[3]]]) * dt
     return A, B
 
 def runge_kutta_4th_order(xk, uk, dynamics, dt):
@@ -251,7 +254,7 @@ def save_Kinf_mat(Kinf, file):
     for row in Kinf:
         formatted_row = ", ".join(f"{val:.8e}f" for val in row)
         lines.append(f"{{{formatted_row}}}")
-    cpp_struct_str = "static struct mat_4_12 Kinf = \n    {{\n"
+    cpp_struct_str = "static const float Kinf[4][12] = \n    {{\n"
     cpp_struct_str += ",\n".join(f"      {line}" for line in lines)
     cpp_struct_str += "\n    }};\n"
     with open(file, "w") as f:
