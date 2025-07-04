@@ -48,11 +48,6 @@
 #define ATTITUDE_UPDATE_DT (float)(1.0f / ATTITUDE_RATE)
 #define TOL 1e-6f
 
-typedef struct mat_4_12_s
-{
-  float m[4][12];
-} mat_4_12_t; // 4x12 matrix
-
 typedef struct mat_3_3_s
 {
   float m[3][3];
@@ -67,10 +62,14 @@ typedef union vec_3_u
   };
 } vec_3_t; // 3x1 column vector
 
-typedef struct vec_12_s
+typedef struct vec_4_u
 {
-  float v[12];
-} vec_12_t; // 12x1 column vector
+  float v[4];
+  struct
+  {
+    float v1, v2, v3, v4;
+  };
+} vec_4_t; // 4x1 column vector
 
 typedef union quat_u
 {
@@ -106,17 +105,37 @@ static float velb_z;
 static float omegab_x;
 static float omegab_y;
 static float omegab_z;
-static int debug_print_counter = 0; // a counter for debug printings rate
+static float posw_x_ref;
+static float posw_y_ref;
+static float posw_z_ref;
+static float yaw_ref;
+static float ctrl_speed_m1;
+static float ctrl_speed_m2;
+static float ctrl_speed_m3;
+static float ctrl_speed_m4;
+static float ctrl_thrust_m1;
+static float ctrl_thrust_m2;
+static float ctrl_thrust_m3;
+static float ctrl_thrust_m4;
+static float ctrl_norm_thrust_m1;
+static float ctrl_norm_thrust_m2;
+static float ctrl_norm_thrust_m3;
+static float ctrl_norm_thrust_m4;
+static int debug_print_counter = 0; // a counter for debug printing rate
 
 // define LQR controller variables
-static const mat_4_12_t Kinf = // the Kinf constant matrix of the LQR controller
-    {{{-4.05881016e+02f, 4.18693028e+02f, 4.98479582e+02f, -2.29752767e+03f, -2.22107965e+03f, 5.11762255e+02f, -5.90581176e+02f, 6.09658672e+02f, 5.87491481e+02f, -4.26743112e+02f, -4.11200457e+02f, 5.25880761e+02f},
-      {3.99678379e+02f, 4.28156029e+02f, 4.98479582e+02f, -2.35582170e+03f, 2.18513105e+03f, -4.99573788e+02f, 5.81415635e+02f, 6.23872664e+02f, 5.87491481e+02f, -4.38998782e+02f, 4.04145594e+02f, -5.13823162e+02f},
-      {4.45756152e+02f, -4.34418218e+02f, 4.98479582e+02f, 2.39209435e+03f, 2.46056279e+03f, 4.69481138e+02f, 6.50063668e+02f, -6.33124728e+02f, 5.87491481e+02f, 4.46113300e+02f, 4.60190785e+02f, 4.84057745e+02f},
-      {-4.39553515e+02f, -4.12430839e+02f, 4.98479582e+02f, 2.26125502e+03f, -2.42461419e+03f, -4.81669605e+02f, -6.40898127e+02f, -6.00406609e+02f, 5.87491481e+02f, 4.19628594e+02f, -4.53135923e+02f, -4.96115344e+02f}}};
-static const float max_thrust = 0.156; // the maximum thrust (in N) provided by only 1 motor
-static kf;
-static float control_speed[4] = {0}; // the controlled angular speeds of the 4 motors
+// the Kinf constant matrix of the LQR controller
+static const float Kinf[4][12] =
+    {{-4.05881016e+02f, 4.18693028e+02f, 4.98479582e+02f, -2.29752767e+03f, -2.22107965e+03f, 5.11762255e+02f, -5.90581176e+02f, 6.09658672e+02f, 5.87491481e+02f, -4.26743112e+02f, -4.11200457e+02f, 5.25880761e+02f},
+     {3.99678379e+02f, 4.28156029e+02f, 4.98479582e+02f, -2.35582170e+03f, 2.18513105e+03f, -4.99573788e+02f, 5.81415635e+02f, 6.23872664e+02f, 5.87491481e+02f, -4.38998782e+02f, 4.04145594e+02f, -5.13823162e+02f},
+     {4.45756152e+02f, -4.34418218e+02f, 4.98479582e+02f, 2.39209435e+03f, 2.46056279e+03f, 4.69481138e+02f, 6.50063668e+02f, -6.33124728e+02f, 5.87491481e+02f, 4.46113300e+02f, 4.60190785e+02f, 4.84057745e+02f},
+     {-4.39553515e+02f, -4.12430839e+02f, 4.98479582e+02f, 2.26125502e+03f, -2.42461419e+03f, -4.81669605e+02f, -6.40898127e+02f, -6.00406609e+02f, 5.87491481e+02f, 4.19628594e+02f, -4.53135923e+02f, -4.96115344e+02f}};
+static const float max_thrust = 0.156f;                                // the maximum thrust (in N) provided by only 1 motor
+static const float kf = 2.25e-08f;                                     // the coefficient parameter of the square model thrust (N) vs. rotor_speed (rad/sec), for a single motor
+static const float hover_speeds[4] = {1900.f, 1900.f, 1900.f, 1900.f}; // the angular speeds (in rad/sec) of the 4 rotors, for the crazyflie to hover
+static float control_speeds[4] = {0.f, 0.f, 0.f, 0.f};                 // the controlled angular speeds (in rad/sec) of the 4 rotors
+static float control_thrusts[4] = {0.f, 0.f, 0.f, 0.f};                // the controlled thrusts (in N) of the 4 rotors
+static float control_norm_thrusts[4] = {0.f, 0.f, 0.f, 0.f};           // the controlled normalized thrusts, in [0, 1], of the 4 rotors
 // static const mat_3_3_t CRAZYFLIE_INERTIA =
 //     {{{16.6e-6f, 0.83e-6f, 0.72e-6f},
 //       {0.83e-6f, 16.6e-6f, 1.8e-6f},
@@ -148,16 +167,26 @@ void appMain()
 //   return result;
 // }
 
+// clamp a float value betweeen 0 and 1
+float clamp_to_unit_interval(float value)
+{
+  if (value < 0.0f)
+    return 0.0f;
+  if (value > 1.0f)
+    return 1.0f;
+  return value;
+}
+
 // convert roll, pitch, yaw angles to the corresponding quaternion
 quat_t qrpy_quat(vec_3_t rpy) // rpy carries the roll, pitch, and yaw angles in radians
 {
   quat_t q;
-  float cr = cos(0.5f * rpy.x);
-  float sr = sin(0.5f * rpy.x);
-  float cp = cos(0.5f * rpy.y);
-  float sp = sin(0.5f * rpy.y);
-  float cy = cos(0.5f * rpy.z);
-  float sy = sin(0.5f * rpy.z);
+  float cr = cosf(0.5f * rpy.x);
+  float sr = sinf(0.5f * rpy.x);
+  float cp = cosf(0.5f * rpy.y);
+  float sp = sinf(0.5f * rpy.y);
+  float cy = cosf(0.5f * rpy.z);
+  float sy = sinf(0.5f * rpy.z);
 
   q.q[0] = cr * cp * cy + sr * sp * sy;
   q.q[1] = sr * cp * cy - cr * sp * sy;
@@ -208,6 +237,34 @@ static vec_3_t mat33_vec3_multiply(mat_3_3_t A, vec_3_t b)
   }
   return result;
 }
+
+// compute the product A * b, where A is a 4x12 matrix and b is a 12x1 column vector
+static void mat412_vec12_multiply(const float A[4][12], const float b[12], float *result)
+{
+  for (int i = 0; i < 3; ++i)
+  {
+    float sum = 0.0f;
+    for (int j = 0; j < 12; ++j)
+    {
+      sum += A[i][j] * b[j];
+    }
+    result[i] = sum;
+  }
+}
+
+// // compute the product A * b, where A is a MxN matrix and b is a Nx1 column vector
+// static void mat_vec_multiply(const float **A, int M, int N, const float *b, float *result)
+// {
+//   for (int i = 0; i < M; ++i)
+//   {
+//     float sum = 0.0f;
+//     for (int j = 0; j < N; ++j)
+//     {
+//       sum += A[i][j] * b[j];
+//     }
+//     result[i] = sum;
+//   }
+// }
 
 // compute the product A * B, where A, B are 3x3 matrices
 static mat_3_3_t mat33_mat33_multiply(mat_3_3_t A, mat_3_3_t B)
@@ -274,11 +331,9 @@ static vec_3_t SO3_minus_right(mat_3_3_t R1, mat_3_3_t R2)
 }
 
 // compute the state error (state_current - state_reference)
-static vec_12_t compute_state_error(const cf_state_t state_cur, const cf_state_t state_ref)
+static void compute_state_error(const cf_state_t state_cur, const cf_state_t state_ref, float *error)
 {
-  vec_12_t error;
-
-  // Extract state components
+  // extract state components
   vec_3_t rw_1 = state_cur.rw;
   quat_t qwb_1 = state_cur.qwb;
   vec_3_t vb_1 = state_cur.vb;
@@ -289,11 +344,11 @@ static vec_12_t compute_state_error(const cf_state_t state_cur, const cf_state_t
   vec_3_t vb_2 = state_ref.vb;
   vec_3_t ob_2 = state_ref.ob;
 
-  // Rotation matrices
+  // rotation matrices
   mat_3_3_t Rwb_1 = Rq_mat(qwb_1);
   mat_3_3_t Rwb_2 = Rq_mat(qwb_2);
 
-  // Compute errors
+  // compute errors
   float rw_error[3];
   for (int i = 0; i < 3; i++)
   {
@@ -315,54 +370,52 @@ static vec_12_t compute_state_error(const cf_state_t state_cur, const cf_state_t
     ob_error[i] = ob_1.v[i] - ob_2.v[i];
   }
 
-  // Concatenate into error vector
+  // concatenate into error vector
   for (int i = 0; i < 3; i++)
   {
-    error.v[i] = rw_error[i];
-    error.v[i + 3] = Rwb_error.v[i];
-    error.v[i + 6] = vb_error[i];
-    error.v[i + 9] = ob_error[i];
+    error[i] = rw_error[i];
+    error[i + 3] = Rwb_error.v[i];
+    error[i + 6] = vb_error[i];
+    error[i + 9] = ob_error[i];
   }
-
-  return error;
 }
 
-// static bool isInit = false;
+static bool isInit = false;
 
-// void attitudeControlInit(const float updateDt)
-// {
-//   if (isInit)
-//     return;
+void attitudeControlInit(const float updateDt)
+{
+  if (isInit)
+    return;
 
-//   // add stuff here
+  // add stuff here
 
-//   isInit = true;
-// }
+  isInit = true;
+}
 
-// void positionControlInit(void)
-// {
-//   return;
-// }
+void positionControlInit(void)
+{
+  return;
+}
 
-// bool attitudeControlTest()
-// {
-//   return isInit;
-// }
+bool attitudeControlTest()
+{
+  return isInit;
+}
 
 void controllerOutOfTreeInit(void)
 {
-  controllerPidInit();
-  // attitudeControlInit(ATTITUDE_UPDATE_DT);
-  // positionControlInit();
-  // return;
+  // controllerPidInit();
+  attitudeControlInit(ATTITUDE_UPDATE_DT);
+  positionControlInit();
+  return;
 }
 
 bool controllerOutOfTreeTest(void)
 {
-  return controllerPidTest();
-  //   bool pass = true;
-  //   pass &= attitudeControlTest();
-  //   return pass;
+  // return controllerPidTest();
+  bool pass = true;
+  pass &= attitudeControlTest();
+  return pass;
 }
 
 void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
@@ -371,12 +424,12 @@ void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
                          const stabilizerStep_t tick)
 {
   // This loop runs at approximately 1000 Hz rate.
-  // rotor speed (rad/sec) w.r.t. PWM:        omegar = sqrt(8e-4f * PWM^2 + 53.33 * PWM)
-  // PWM w.r.t. rotor speed (rad/sec):        PWM = -33333 + sqrt(1250 * omegar^2 + 11111*10^5)
-  // thrust (N) w.r.t rotor_speed (rad/sec):  Fi = (9/4)*10^(-8) * ui^2
 
-  // // controlModeForce for the control
-  // control->controlMode = controlModeForce;
+  // controlModeForce for the control
+  // rotor_speed (rad/sec) vs. PWM:         omegar = sqrt(8e-4f * PWM^2 + 53.33 * PWM)
+  // PWM vs. rotor_speed (rad/sec):         PWM = -33333 + sqrt(1250 * omegar^2 + 11111*10^5)
+  // thrust (N) vs. rotor_speed (rad/sec):  Fi = kf * ui^2 = (9/4)*10^(-8) * ui^2
+  control->controlMode = controlModeForce;
 
   // get the current state of the crazyflie
   vec_3_t vw_cur = {{state->velocity.x, state->velocity.y, state->velocity.z}};
@@ -417,9 +470,18 @@ void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
       .ob = {{0.0, 0.0, 0.0}},
   };
 
-  // create the control signal
-  vec_12_t state_error = compute_state_error(state_cur, state_ref);
-  // control->normalizedForces = ;
+  // compute the control signal
+  float state_error[3];
+  compute_state_error(state_cur, state_ref, state_error);
+  float control_feedback[4];
+  mat412_vec12_multiply(Kinf, state_error, control_feedback);
+  for (int i = 0; i < 4; ++i)
+  {
+    control_speeds[i] = hover_speeds[i] - control_feedback[i];
+    control_thrusts[i] = kf * powf(control_speeds[i], 2.f);
+    control_norm_thrusts[i] = clamp_to_unit_interval(control_thrusts[i] / max_thrust);
+    control->normalizedForces[i] = control_norm_thrusts[i];
+  }
 
   // print some data for debugging
   if (debug_print_counter % 500 == 0)
@@ -439,10 +501,18 @@ void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
                 (double)degrees(rpyb_ref.x), (double)degrees(rpyb_ref.y), (double)degrees(rpyb_ref.z));
     DEBUG_PRINT("State error [%lu]: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]\n",
                 tick,
-                (double)state_error.v[0], (double)state_error.v[1], (double)state_error.v[2],
-                (double)state_error.v[3], (double)state_error.v[4], (double)state_error.v[5],
-                (double)state_error.v[6], (double)state_error.v[7], (double)state_error.v[8],
-                (double)state_error.v[9], (double)state_error.v[10], (double)state_error.v[11]);
+                (double)state_error[0], (double)state_error[1], (double)state_error[2],
+                (double)state_error[3], (double)state_error[4], (double)state_error[5],
+                (double)state_error[6], (double)state_error[7], (double)state_error[8],
+                (double)state_error[9], (double)state_error[10], (double)state_error[11]);
+    DEBUG_PRINT("Motors speeds (rad/sec) [%lu]: m1 = %.0f,\t\t m2 = %.0f,\t\t m3 = %.0f,\t\t m4 = %.0f\n",
+                tick,
+                (double)control_speeds[0], (double)control_speeds[1], (double)control_speeds[2], (double)control_speeds[3]);
+    DEBUG_PRINT("Motors thrusts (N) [%lu]: m1 = %.3f (%.3f),\t\t m2 = %.3f (%.3f),\t\t m3 = %.3f (%.3f),\t\t m4 = %.3f (%.3f)\n",
+                tick,
+                (double)control_thrusts[0], (double)control_norm_thrusts[0], (double)control_thrusts[1], (double)control_norm_thrusts[1],
+                (double)control_thrusts[2], (double)control_norm_thrusts[2], (double)control_thrusts[3], (double)control_norm_thrusts[3]);
+
     DEBUG_PRINT("\n");
   }
   debug_print_counter += 1;
@@ -464,6 +534,22 @@ void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
   omegab_x = state_cur.ob.x;
   omegab_y = state_cur.ob.y;
   omegab_z = state_cur.ob.z;
+  posw_x_ref = state_ref.rw.x;
+  posw_y_ref = state_ref.rw.y;
+  posw_z_ref = state_ref.rw.z;
+  yaw_ref = rpyb_ref.z;
+  ctrl_speed_m1 = control_speeds[0];
+  ctrl_speed_m2 = control_speeds[1];
+  ctrl_speed_m3 = control_speeds[2];
+  ctrl_speed_m4 = control_speeds[3];
+  ctrl_thrust_m1 = control_thrusts[0];
+  ctrl_thrust_m2 = control_thrusts[1];
+  ctrl_thrust_m3 = control_thrusts[2];
+  ctrl_thrust_m4 = control_thrusts[3];
+  ctrl_norm_thrust_m1 = control_norm_thrusts[0];
+  ctrl_norm_thrust_m2 = control_norm_thrusts[1];
+  ctrl_norm_thrust_m3 = control_norm_thrusts[2];
+  ctrl_norm_thrust_m4 = control_norm_thrusts[3];
 
   controllerPid(control, setpoint, sensors, state, tick);
 }
@@ -533,4 +619,64 @@ LOG_ADD(LOG_FLOAT, omegab_y, &omegab_y)
  * @brief Angular velocity z (deg/s) - body frame
  */
 LOG_ADD(LOG_FLOAT, omegab_z, &omegab_z)
+/**
+ * @brief Reference position x (m) - world frame
+ */
+LOG_ADD(LOG_FLOAT, posw_x_ref, &posw_x_ref)
+/**
+ * @brief Reference position y (m) - world frame
+ */
+LOG_ADD(LOG_FLOAT, posw_y_ref, &posw_y_ref)
+/**
+ * @brief Reference position z (m) - world frame
+ */
+LOG_ADD(LOG_FLOAT, posw_z_ref, &posw_z_ref)
+/**
+ * @brief Control speed (rad/sec) for motor 1
+ */
+LOG_ADD(LOG_FLOAT, ctrl_speed_m1, &ctrl_speed_m1)
+/**
+ * @brief Control speed (rad/sec) for motor 2
+ */
+LOG_ADD(LOG_FLOAT, ctrl_speed_m2, &ctrl_speed_m2)
+/**
+ * @brief Control speed (rad/sec) for motor 3
+ */
+LOG_ADD(LOG_FLOAT, ctrl_speed_m3, &ctrl_speed_m3)
+/**
+ * @brief Control speed (rad/sec) for motor 4
+ */
+LOG_ADD(LOG_FLOAT, ctrl_speed_m4, &ctrl_speed_m4)
+/**
+ * @brief Control thrust (N) for motor 1
+ */
+LOG_ADD(LOG_FLOAT, ctrl_thrust_m1, &ctrl_thrust_m1)
+/**
+ * @brief Control thrust (N) for motor 2
+ */
+LOG_ADD(LOG_FLOAT, ctrl_thrust_m2, &ctrl_thrust_m2)
+/**
+ * @brief Control thrust (N) for motor 3
+ */
+LOG_ADD(LOG_FLOAT, ctrl_thrust_m3, &ctrl_thrust_m3)
+/**
+ * @brief Control thrust (N) for motor 4
+ */
+LOG_ADD(LOG_FLOAT, ctrl_thrust_m4, &ctrl_thrust_m4)
+/**
+ * @brief Control normalized thrust for motor 1
+ */
+LOG_ADD(LOG_FLOAT, ctrl_norm_thrust_m1, &ctrl_norm_thrust_m1)
+/**
+ * @brief Control normalized thrust for motor 2
+ */
+LOG_ADD(LOG_FLOAT, ctrl_norm_thrust_m2, &ctrl_norm_thrust_m2)
+/**
+ * @brief Control normalized thrust for motor 3
+ */
+LOG_ADD(LOG_FLOAT, ctrl_norm_thrust_m3, &ctrl_norm_thrust_m3)
+/**
+ * @brief Control normalized thrust for motor 4
+ */
+LOG_ADD(LOG_FLOAT, ctrl_norm_thrust_m4, &ctrl_norm_thrust_m4)
 LOG_GROUP_STOP(LQRcontroller)
