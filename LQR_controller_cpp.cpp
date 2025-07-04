@@ -88,58 +88,66 @@ typedef struct cf_state_s
   vec_3_t ob; // angular velocity w.r.t body frame
 } cf_state_t; // crazyflie's state structure
 
-// define some logging variables
-static float posw_x;
-static float posw_y;
-static float posw_z;
-static float qwb_w;
-static float qwb_x;
-static float qwb_y;
-static float qwb_z;
-static float roll;
-static float pitch;
-static float yaw;
-static float velb_x;
-static float velb_y;
-static float velb_z;
-static float omegab_x;
-static float omegab_y;
-static float omegab_z;
-static float posw_x_ref;
-static float posw_y_ref;
-static float posw_z_ref;
-static float yaw_ref;
-static float ctrl_speed_m1;
-static float ctrl_speed_m2;
-static float ctrl_speed_m3;
-static float ctrl_speed_m4;
-static float ctrl_thrust_m1;
-static float ctrl_thrust_m2;
-static float ctrl_thrust_m3;
-static float ctrl_thrust_m4;
-static float ctrl_norm_thrust_m1;
-static float ctrl_norm_thrust_m2;
-static float ctrl_norm_thrust_m3;
-static float ctrl_norm_thrust_m4;
+// // define some logging variables
+// static float posw_x;
+// static float posw_y;
+// static float posw_z;
+// static float qwb_w;
+// static float qwb_x;
+// static float qwb_y;
+// static float qwb_z;
+// static float roll;
+// static float pitch;
+// static float yaw;
+// static float velb_x;
+// static float velb_y;
+// static float velb_z;
+// static float omegab_x;
+// static float omegab_y;
+// static float omegab_z;
+// static float posw_x_ref;
+// static float posw_y_ref;
+// static float posw_z_ref;
+// static float yaw_ref;
+// static float ctrl_speed_m1;
+// static float ctrl_speed_m2;
+// static float ctrl_speed_m3;
+// static float ctrl_speed_m4;
+// static float ctrl_thrust_m1;
+// static float ctrl_thrust_m2;
+// static float ctrl_thrust_m3;
+// static float ctrl_thrust_m4;
+// static float ctrl_norm_thrust_m1;
+// static float ctrl_norm_thrust_m2;
+// static float ctrl_norm_thrust_m3;
+// static float ctrl_norm_thrust_m4;
 static int debug_print_counter = 0; // a counter for debug printing rate
 
-// define LQR controller variables
-// the Kinf constant matrix of the LQR controller
-static const float Kinf[4][12] =
-    {{-4.05881016e+02f, 4.18693028e+02f, 4.98479582e+02f, -2.29752767e+03f, -2.22107965e+03f, 5.11762255e+02f, -5.90581176e+02f, 6.09658672e+02f, 5.87491481e+02f, -4.26743112e+02f, -4.11200457e+02f, 5.25880761e+02f},
-     {3.99678379e+02f, 4.28156029e+02f, 4.98479582e+02f, -2.35582170e+03f, 2.18513105e+03f, -4.99573788e+02f, 5.81415635e+02f, 6.23872664e+02f, 5.87491481e+02f, -4.38998782e+02f, 4.04145594e+02f, -5.13823162e+02f},
-     {4.45756152e+02f, -4.34418218e+02f, 4.98479582e+02f, 2.39209435e+03f, 2.46056279e+03f, 4.69481138e+02f, 6.50063668e+02f, -6.33124728e+02f, 5.87491481e+02f, 4.46113300e+02f, 4.60190785e+02f, 4.84057745e+02f},
-     {-4.39553515e+02f, -4.12430839e+02f, 4.98479582e+02f, 2.26125502e+03f, -2.42461419e+03f, -4.81669605e+02f, -6.40898127e+02f, -6.00406609e+02f, 5.87491481e+02f, 4.19628594e+02f, -4.53135923e+02f, -4.96115344e+02f}};
-static const float max_thrust = 0.156f;                                // the maximum thrust (in N) provided by only 1 motor
-static const float kf = 2.25e-08f;                                     // the coefficient parameter of the square model thrust (N) vs. rotor_speed (rad/sec), for a single motor
-static const float hover_speeds[4] = {1900.f, 1900.f, 1900.f, 1900.f}; // the angular speeds (in rad/sec) of the 4 rotors, for the crazyflie to hover
-static float control_speeds[4] = {0.f, 0.f, 0.f, 0.f};                 // the controlled angular speeds (in rad/sec) of the 4 rotors
-static float control_thrusts[4] = {0.f, 0.f, 0.f, 0.f};                // the controlled thrusts (in N) of the 4 rotors
-static float control_norm_thrusts[4] = {0.f, 0.f, 0.f, 0.f};           // the controlled normalized thrusts, in [0, 1], of the 4 rotors
+// some crazyflie parameters
+static const float g = 9.81;  // gravity's acceleration (in m/sec^2)
+static const float m = 0.033; // mass (in kg)
+static const float l = 0.046; // arm length (in m)
 // static const mat_3_3_t CRAZYFLIE_INERTIA =
 //     {{{16.6e-6f, 0.83e-6f, 0.72e-6f},
 //       {0.83e-6f, 16.6e-6f, 1.8e-6f},
 //       {0.72e-6f, 1.8e-6f, 29.3e-6f}}};
+static const float kf = 2.25e-08f; // the coefficient parameter of the square model: thrust (N) vs. rotor_speed (rad/sec), for a single motor
+static const float kt = 1.34e-10f; // the coefficient parameter of the square model: torque (N*m) vs. rotor_speed (rad/sec), for a single motor, kt = 0.00596 * kf
+
+// define LQR controller variables
+// the Kinf constant matrix of the LQR controller
+static const float Kinf[4][12] =
+    {{{-4.44452152e+02f, 4.33024173e+02f, 4.98479582e+02f, -2.38404006e+03f, -2.45304027e+03f, -4.69379790e+02f, -6.48139092e+02f, 6.31066494e+02f, 5.87491481e+02f, -4.44537802e+02f, -4.58722942e+02f, -4.84044820e+02f},
+      {4.38138384e+02f, 4.10781651e+02f, 4.98479582e+02f, -2.25180314e+03f, 2.41653293e+03f, 4.81660322e+02f, 6.38815301e+02f, 5.97977153e+02f, 5.87491481e+02f, -4.17792135e+02f, 4.51574532e+02f, 4.96197310e+02f},
+      {4.04226800e+02f, -4.17155328e+02f, 4.98479582e+02f, 2.28863647e+03f, 2.21151366e+03f, -5.11962778e+02f, 5.88138453e+02f, -6.07387985e+02f, 5.87491481e+02f, 4.25000554e+02f, 4.09323963e+02f, -5.26179601e+02f},
+      {-3.97913033e+02f, -4.26650497e+02f, 4.98479582e+02f, 2.34720674e+03f, -2.17500632e+03f, 4.99682247e+02f, -5.78814662e+02f, -6.21655663e+02f, 5.87491481e+02f, 4.37329383e+02f, -4.02175552e+02f, 5.14027111e+02f}}};
+static const float hover_speeds[4] = {1900.f, 1900.f, 1900.f, 1900.f}; // the angular speeds (in rad/sec) of the 4 rotors, for the crazyflie to hover
+static float control_speeds[4] = {0.f, 0.f, 0.f, 0.f};                 // the controlled angular speeds (in rad/sec) of the 4 rotors
+static float control_thrusts[4] = {0.f, 0.f, 0.f, 0.f};                // the controlled thrusts (in N) of the 4 rotors
+
+// for the normalized forces control mode
+static float control_norm_thrusts[4] = {0.f, 0.f, 0.f, 0.f}; // the controlled normalized thrusts, in [0, 1], of the 4 rotors
+static const float max_thrust = 0.156f;                      // the maximum thrust (in N) provided by only 1 motor
 
 void appMain()
 {
@@ -425,11 +433,10 @@ void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
 {
   // This loop runs at approximately 1000 Hz rate.
 
-  // controlModeForce for the control
   // rotor_speed (rad/sec) vs. PWM:         omegar = sqrt(8e-4f * PWM^2 + 53.33 * PWM)
   // PWM vs. rotor_speed (rad/sec):         PWM = -33333 + sqrt(1250 * omegar^2 + 11111*10^5)
   // thrust (N) vs. rotor_speed (rad/sec):  Fi = kf * ui^2 = (9/4)*10^(-8) * ui^2
-  control->controlMode = controlModeForce;
+  control->controlMode = controlModeForce; // controlModeForce for the control
 
   // get the current state of the crazyflie
   vec_3_t vw_cur = {{state->velocity.x, state->velocity.y, state->velocity.z}};
@@ -454,9 +461,8 @@ void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
   };
 
   // get the reference state of the crazyflie (in which state it should end up)
-  // vec_3_t rpyb_ref = {{radians(setpoint->attitude.roll), -radians(setpoint->attitude.pitch), radians(setpoint->attitude.yaw)}};
-  // quat_t qwb_ref = qrpy_quat(rpyb_ref);
   vec_3_t rpyb_ref = {{0., 0., radians(setpoint->attitude.yaw)}};
+  // vec_3_t rpyb_ref = {{radians(setpoint->attitude.roll), -radians(setpoint->attitude.pitch), radians(setpoint->attitude.yaw)}};
   quat_t qwb_ref = qrpy_quat(rpyb_ref);
   cf_state_t state_ref = {
       .rw = {{setpoint->position.x,
@@ -484,7 +490,7 @@ void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
   }
 
   // print some data for debugging
-  if (debug_print_counter % 500 == 0)
+  if (debug_print_counter % 1000 == 0)
   {
     debug_print_counter = 0;
     DEBUG_PRINT("Current state [%lu]: rw(m) = [%.3f, %.3f, %.3f],\t\t qwb = [%.3f, %.3f, %.3f, %.3f],\t\t rpyb(deg) = [%.3f, %.3f, %.3f],\n\t\t vb(m/s) = [%.3f, %.3f, %.3f],\t\t ob(deg/s) = [%.3f, %.3f, %.3f]\n",
@@ -512,171 +518,170 @@ void controllerOutOfTree(control_t *control, const setpoint_t *setpoint,
                 tick,
                 (double)control_thrusts[0], (double)control_norm_thrusts[0], (double)control_thrusts[1], (double)control_norm_thrusts[1],
                 (double)control_thrusts[2], (double)control_norm_thrusts[2], (double)control_thrusts[3], (double)control_norm_thrusts[3]);
-
     DEBUG_PRINT("\n");
   }
   debug_print_counter += 1;
 
-  // store data to the logging variables
-  posw_x = state_cur.rw.x;
-  posw_y = state_cur.rw.y;
-  posw_z = state_cur.rw.z;
-  qwb_w = state_cur.qwb.w;
-  qwb_x = state_cur.qwb.x;
-  qwb_y = state_cur.qwb.y;
-  qwb_z = state_cur.qwb.z;
-  roll = rpyb_cur.x;
-  pitch = rpyb_cur.y;
-  yaw = rpyb_cur.z;
-  velb_x = state_cur.vb.x;
-  velb_y = state_cur.vb.y;
-  velb_z = state_cur.vb.z;
-  omegab_x = state_cur.ob.x;
-  omegab_y = state_cur.ob.y;
-  omegab_z = state_cur.ob.z;
-  posw_x_ref = state_ref.rw.x;
-  posw_y_ref = state_ref.rw.y;
-  posw_z_ref = state_ref.rw.z;
-  yaw_ref = rpyb_ref.z;
-  ctrl_speed_m1 = control_speeds[0];
-  ctrl_speed_m2 = control_speeds[1];
-  ctrl_speed_m3 = control_speeds[2];
-  ctrl_speed_m4 = control_speeds[3];
-  ctrl_thrust_m1 = control_thrusts[0];
-  ctrl_thrust_m2 = control_thrusts[1];
-  ctrl_thrust_m3 = control_thrusts[2];
-  ctrl_thrust_m4 = control_thrusts[3];
-  ctrl_norm_thrust_m1 = control_norm_thrusts[0];
-  ctrl_norm_thrust_m2 = control_norm_thrusts[1];
-  ctrl_norm_thrust_m3 = control_norm_thrusts[2];
-  ctrl_norm_thrust_m4 = control_norm_thrusts[3];
+  // // store data to the logging variables
+  // posw_x = state_cur.rw.x;
+  // posw_y = state_cur.rw.y;
+  // posw_z = state_cur.rw.z;
+  // qwb_w = state_cur.qwb.w;
+  // qwb_x = state_cur.qwb.x;
+  // qwb_y = state_cur.qwb.y;
+  // qwb_z = state_cur.qwb.z;
+  // roll = rpyb_cur.x;
+  // pitch = rpyb_cur.y;
+  // yaw = rpyb_cur.z;
+  // velb_x = state_cur.vb.x;
+  // velb_y = state_cur.vb.y;
+  // velb_z = state_cur.vb.z;
+  // omegab_x = state_cur.ob.x;
+  // omegab_y = state_cur.ob.y;
+  // omegab_z = state_cur.ob.z;
+  // posw_x_ref = state_ref.rw.x;
+  // posw_y_ref = state_ref.rw.y;
+  // posw_z_ref = state_ref.rw.z;
+  // yaw_ref = rpyb_ref.z;
+  // ctrl_speed_m1 = control_speeds[0];
+  // ctrl_speed_m2 = control_speeds[1];
+  // ctrl_speed_m3 = control_speeds[2];
+  // ctrl_speed_m4 = control_speeds[3];
+  // ctrl_thrust_m1 = control_thrusts[0];
+  // ctrl_thrust_m2 = control_thrusts[1];
+  // ctrl_thrust_m3 = control_thrusts[2];
+  // ctrl_thrust_m4 = control_thrusts[3];
+  // ctrl_norm_thrust_m1 = control_norm_thrusts[0];
+  // ctrl_norm_thrust_m2 = control_norm_thrusts[1];
+  // ctrl_norm_thrust_m3 = control_norm_thrusts[2];
+  // ctrl_norm_thrust_m4 = control_norm_thrusts[3];
 
-  controllerPid(control, setpoint, sensors, state, tick);
+  // controllerPid(control, setpoint, sensors, state, tick);
 }
 
 LOG_GROUP_START(LQRcontroller)
-/**
- * @brief Position x (m) - world frame
- */
-LOG_ADD(LOG_FLOAT, posw_x, &posw_x)
-/**
- * @brief Position y (m) - world frame
- */
-LOG_ADD(LOG_FLOAT, posw_y, &posw_y)
-/**
- * @brief Position z (m) - world frame
- */
-LOG_ADD(LOG_FLOAT, posw_z, &posw_z)
-/**
- * @brief Body Quaternion w - world frame
- */
-LOG_ADD(LOG_FLOAT, qwb_w, &qwb_w)
-/**
- * @brief Body Quaternion x - world frame
- */
-LOG_ADD(LOG_FLOAT, qwb_x, &qwb_x)
-/**
- * @brief Body Quaternion y - world frame
- */
-LOG_ADD(LOG_FLOAT, qwb_y, &qwb_y)
-/**
- * @brief Body Quaternion z - world frame
- */
-LOG_ADD(LOG_FLOAT, qwb_z, &qwb_z)
-/**
- * @brief Roll angle (deg)
- */
-LOG_ADD(LOG_FLOAT, roll, &roll)
-/**
- * @brief Pitch angle (deg)
- */
-LOG_ADD(LOG_FLOAT, pitch, &pitch)
-/**
- * @brief Yaw angle (deg)
- */
-LOG_ADD(LOG_FLOAT, yaw, &yaw)
-/**
- * @brief Linear velocity x (m/s) - body frame
- */
-LOG_ADD(LOG_FLOAT, velb_x, &velb_x)
-/**
- * @brief Linear velocity y (m/s) - body frame
- */
-LOG_ADD(LOG_FLOAT, velb_y, &velb_y)
-/**
- * @brief Linear velocity z (m/s) - body frame
- */
-LOG_ADD(LOG_FLOAT, velb_z, &velb_z)
-/**
- * @brief Angular velocity x (deg/s) - body frame
- */
-LOG_ADD(LOG_FLOAT, omegab_x, &omegab_x)
-/**
- * @brief Angular velocity y (deg/s) - body frame
- */
-LOG_ADD(LOG_FLOAT, omegab_y, &omegab_y)
-/**
- * @brief Angular velocity z (deg/s) - body frame
- */
-LOG_ADD(LOG_FLOAT, omegab_z, &omegab_z)
-/**
- * @brief Reference position x (m) - world frame
- */
-LOG_ADD(LOG_FLOAT, posw_x_ref, &posw_x_ref)
-/**
- * @brief Reference position y (m) - world frame
- */
-LOG_ADD(LOG_FLOAT, posw_y_ref, &posw_y_ref)
-/**
- * @brief Reference position z (m) - world frame
- */
-LOG_ADD(LOG_FLOAT, posw_z_ref, &posw_z_ref)
-/**
- * @brief Control speed (rad/sec) for motor 1
- */
-LOG_ADD(LOG_FLOAT, ctrl_speed_m1, &ctrl_speed_m1)
-/**
- * @brief Control speed (rad/sec) for motor 2
- */
-LOG_ADD(LOG_FLOAT, ctrl_speed_m2, &ctrl_speed_m2)
-/**
- * @brief Control speed (rad/sec) for motor 3
- */
-LOG_ADD(LOG_FLOAT, ctrl_speed_m3, &ctrl_speed_m3)
-/**
- * @brief Control speed (rad/sec) for motor 4
- */
-LOG_ADD(LOG_FLOAT, ctrl_speed_m4, &ctrl_speed_m4)
-/**
- * @brief Control thrust (N) for motor 1
- */
-LOG_ADD(LOG_FLOAT, ctrl_thrust_m1, &ctrl_thrust_m1)
-/**
- * @brief Control thrust (N) for motor 2
- */
-LOG_ADD(LOG_FLOAT, ctrl_thrust_m2, &ctrl_thrust_m2)
-/**
- * @brief Control thrust (N) for motor 3
- */
-LOG_ADD(LOG_FLOAT, ctrl_thrust_m3, &ctrl_thrust_m3)
-/**
- * @brief Control thrust (N) for motor 4
- */
-LOG_ADD(LOG_FLOAT, ctrl_thrust_m4, &ctrl_thrust_m4)
-/**
- * @brief Control normalized thrust for motor 1
- */
-LOG_ADD(LOG_FLOAT, ctrl_norm_thrust_m1, &ctrl_norm_thrust_m1)
-/**
- * @brief Control normalized thrust for motor 2
- */
-LOG_ADD(LOG_FLOAT, ctrl_norm_thrust_m2, &ctrl_norm_thrust_m2)
-/**
- * @brief Control normalized thrust for motor 3
- */
-LOG_ADD(LOG_FLOAT, ctrl_norm_thrust_m3, &ctrl_norm_thrust_m3)
-/**
- * @brief Control normalized thrust for motor 4
- */
-LOG_ADD(LOG_FLOAT, ctrl_norm_thrust_m4, &ctrl_norm_thrust_m4)
+// /**
+//  * @brief Position x (m) - world frame
+//  */
+// LOG_ADD(LOG_FLOAT, posw_x, &posw_x)
+// /**
+//  * @brief Position y (m) - world frame
+//  */
+// LOG_ADD(LOG_FLOAT, posw_y, &posw_y)
+// /**
+//  * @brief Position z (m) - world frame
+//  */
+// LOG_ADD(LOG_FLOAT, posw_z, &posw_z)
+// /**
+//  * @brief Body Quaternion w - world frame
+//  */
+// LOG_ADD(LOG_FLOAT, qwb_w, &qwb_w)
+// /**
+//  * @brief Body Quaternion x - world frame
+//  */
+// LOG_ADD(LOG_FLOAT, qwb_x, &qwb_x)
+// /**
+//  * @brief Body Quaternion y - world frame
+//  */
+// LOG_ADD(LOG_FLOAT, qwb_y, &qwb_y)
+// /**
+//  * @brief Body Quaternion z - world frame
+//  */
+// LOG_ADD(LOG_FLOAT, qwb_z, &qwb_z)
+// /**
+//  * @brief Roll angle (deg)
+//  */
+// LOG_ADD(LOG_FLOAT, roll, &roll)
+// /**
+//  * @brief Pitch angle (deg)
+//  */
+// LOG_ADD(LOG_FLOAT, pitch, &pitch)
+// /**
+//  * @brief Yaw angle (deg)
+//  */
+// LOG_ADD(LOG_FLOAT, yaw, &yaw)
+// /**
+//  * @brief Linear velocity x (m/s) - body frame
+//  */
+// LOG_ADD(LOG_FLOAT, velb_x, &velb_x)
+// /**
+//  * @brief Linear velocity y (m/s) - body frame
+//  */
+// LOG_ADD(LOG_FLOAT, velb_y, &velb_y)
+// /**
+//  * @brief Linear velocity z (m/s) - body frame
+//  */
+// LOG_ADD(LOG_FLOAT, velb_z, &velb_z)
+// /**
+//  * @brief Angular velocity x (deg/s) - body frame
+//  */
+// LOG_ADD(LOG_FLOAT, omegab_x, &omegab_x)
+// /**
+//  * @brief Angular velocity y (deg/s) - body frame
+//  */
+// LOG_ADD(LOG_FLOAT, omegab_y, &omegab_y)
+// /**
+//  * @brief Angular velocity z (deg/s) - body frame
+//  */
+// LOG_ADD(LOG_FLOAT, omegab_z, &omegab_z)
+// /**
+//  * @brief Reference position x (m) - world frame
+//  */
+// LOG_ADD(LOG_FLOAT, posw_x_ref, &posw_x_ref)
+// /**
+//  * @brief Reference position y (m) - world frame
+//  */
+// LOG_ADD(LOG_FLOAT, posw_y_ref, &posw_y_ref)
+// /**
+//  * @brief Reference position z (m) - world frame
+//  */
+// LOG_ADD(LOG_FLOAT, posw_z_ref, &posw_z_ref)
+// /**
+//  * @brief Control speed (rad/sec) for motor 1
+//  */
+// LOG_ADD(LOG_FLOAT, ctrl_speed_m1, &ctrl_speed_m1)
+// /**
+//  * @brief Control speed (rad/sec) for motor 2
+//  */
+// LOG_ADD(LOG_FLOAT, ctrl_speed_m2, &ctrl_speed_m2)
+// /**
+//  * @brief Control speed (rad/sec) for motor 3
+//  */
+// LOG_ADD(LOG_FLOAT, ctrl_speed_m3, &ctrl_speed_m3)
+// /**
+//  * @brief Control speed (rad/sec) for motor 4
+//  */
+// LOG_ADD(LOG_FLOAT, ctrl_speed_m4, &ctrl_speed_m4)
+// /**
+//  * @brief Control thrust (N) for motor 1
+//  */
+// LOG_ADD(LOG_FLOAT, ctrl_thrust_m1, &ctrl_thrust_m1)
+// /**
+//  * @brief Control thrust (N) for motor 2
+//  */
+// LOG_ADD(LOG_FLOAT, ctrl_thrust_m2, &ctrl_thrust_m2)
+// /**
+//  * @brief Control thrust (N) for motor 3
+//  */
+// LOG_ADD(LOG_FLOAT, ctrl_thrust_m3, &ctrl_thrust_m3)
+// /**
+//  * @brief Control thrust (N) for motor 4
+//  */
+// LOG_ADD(LOG_FLOAT, ctrl_thrust_m4, &ctrl_thrust_m4)
+// /**
+//  * @brief Control normalized thrust for motor 1
+//  */
+// LOG_ADD(LOG_FLOAT, ctrl_norm_thrust_m1, &ctrl_norm_thrust_m1)
+// /**
+//  * @brief Control normalized thrust for motor 2
+//  */
+// LOG_ADD(LOG_FLOAT, ctrl_norm_thrust_m2, &ctrl_norm_thrust_m2)
+// /**
+//  * @brief Control normalized thrust for motor 3
+//  */
+// LOG_ADD(LOG_FLOAT, ctrl_norm_thrust_m3, &ctrl_norm_thrust_m3)
+// /**
+//  * @brief Control normalized thrust for motor 4
+//  */
+// LOG_ADD(LOG_FLOAT, ctrl_norm_thrust_m4, &ctrl_norm_thrust_m4)
 LOG_GROUP_STOP(LQRcontroller)
