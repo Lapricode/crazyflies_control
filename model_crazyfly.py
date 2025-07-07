@@ -20,9 +20,9 @@ rotors:     Fi = Kf * ui^2
             the rotors 1, 3 rotate counter-clockwise, and the rotors 2, 4 rotate clockwise
             the motor arms form right angles (90 degrees) with each other
 note:   the state x comes with the quaternion qwb of the rotation matrix Rwb,
-        but we use the rotation matrix Rwb directly for the dynamics and the jacobians calculations
+        but we also use the rotation matrix Rwb directly for the dynamics and the jacobians calculations
         Rwb \in R^(3x3) is the rotation matrix of the body frame w.r.t. the world frame
-        Rwb \in R^(3x3) has dimension 3
+        Rwb \in R^(3x3) has dimension 3, this is the dimension of its Lie algebra vector
 """
 
 
@@ -50,8 +50,6 @@ N = 12  # number of states in the quadrotor dynamics
 M = 4  # number of inputs in the quadrotor dynamics
 
 def quadrotor_dynamics(x, u):
-    x = x.reshape(-1)
-    u = u.reshape(-1)
     rw = x[:3]  # position in the world frame
     qwb = x[3:7]  # orientation quaternion of the body frame w.r.t. the world frame
     vb = x[7:10]  # linear velocity in the body frame
@@ -98,18 +96,43 @@ def quadrotor_dynamics_du(x, u):
                                     [-Kt * 2.*u[0], Kt * 2.*u[1], -Kt * 2.*u[2], Kt * 2.*u[3]]])
     return B
 
+def finite_differences(f, x, u, dt, eps = 1e-5):
+    A_fd = np.zeros((N, N))
+    for i in range(N):
+        ei = np.zeros(N)
+        ei[i] = eps
+        fx_plus = f(compute_state_right_plus(x, ei), u, dt)
+        fx_minus = f(compute_state_right_plus(x, -ei), u, dt)
+        if i == 3:
+            print(compute_state_right_plus(x, ei))
+            print(compute_state_right_plus(x, -ei))
+            print(compute_state_right_minus(fx_plus, fx_minus))
+        A_fd[:, i] = compute_state_right_minus(fx_plus, fx_minus) / (2*eps)
+    B_fd = np.zeros((N, M))
+    for j in range(M):
+        ej = np.zeros(M)
+        ej[j] = eps
+        fu_plus = f(x, u + ej, dt)
+        fu_minus = f(x, u - ej, dt)
+        B_fd[:, j] = compute_state_right_minus(fu_plus, fu_minus) / (2*eps)
+    return A_fd, B_fd
+
+# wrap your euler so its signature is (x, u, dt) → next x
+def euler_wrap(x, u, dt):
+    return euler(x, u, quadrotor_dynamics, dt)
+
 def euler(xk, uk, dynamics, dt):
     rw = xk[:3]
     qwb = xk[3:7]
-    # Rwb = S3.Rq_mat(qwb)
     vb = xk[7:10]
     omegab = xk[10:13]
     rw_dot, Rwb_dot, vb_dot, omegab_dot = dynamics(xk, uk)
-    rw += rw_dot * dt
-    qwb = S3.plus_right(qwb, omegab * dt)
+    rw = np.copy(rw + rw_dot * dt)
+    # Rwb = S3.Rq_mat(qwb)
     # Rwb = SO3.plus_right(Rwb, omegab * dt)
-    vb += vb_dot * dt
-    omegab += omegab_dot * dt
+    qwb = S3.plus_right(qwb, omegab * dt)
+    vb = np.copy(vb + vb_dot * dt)
+    omegab = np.copy(omegab + omegab_dot * dt)
     x = np.concatenate([rw, qwb, vb, omegab])
     return x
 
@@ -121,22 +144,24 @@ def linearize_euler(x_bar, u_bar, dt):
     omegab = x_bar[10:13]
     vb_hat = SO3.vec_hat(vb)
     omegab_hat = SO3.vec_hat(omegab)
-
+    # A Jacobian for the state is an N x N matrix
     A = np.zeros((N, N))
     A[0:3, 0:3] = np.eye(3)
     A[0:3, 3:6] = -Rwb @ vb_hat * dt
     A[0:3, 6:9] = Rwb * dt
     A[3:6, 3:6] = SO3.jacobian_plus_right_1(Rwb, omegab * dt)
     A[3:6, 9:12] = SO3.jacobian_plus_right_2(Rwb, omegab * dt) * dt
+    # A[3:6, 3:6] = S3.jacobian_plus_right_1(qwb, omegab * dt)
+    # A[3:6, 9:12] = S3.jacobian_plus_right_2(qwb, omegab * dt) * dt
     A[6:9, 3:6] = Rwb.T @ SO3.vec_hat(np.array([0., 0., -g])) @ Rwb * dt
     A[6:9, 6:9] = np.eye(3) - omegab_hat * dt
     A[6:9, 9:12] = vb_hat * dt
     A[9:12, 9:12] = np.eye(3) - I_inv @ (omegab_hat @ I - SO3.vec_hat(I @ omegab)) * dt
-
+    # B Jacobian for the control input is an N x M matrix
     B = np.zeros((N, M))
     B[8, :] = Kf/m * 2.*u_bar * dt
-    cos_comp = l*Kf * np.cos(body_yaw0)
-    sin_comp = l*Kf * np.sin(body_yaw0)
+    cos_comp = l * Kf * np.cos(body_yaw0)
+    sin_comp = l * Kf * np.sin(body_yaw0)
     B[9:12, :] = I_inv @ np.array([[cos_comp * 2.*u_bar[0], sin_comp * 2.*u_bar[1], -cos_comp * 2.*u_bar[2], -sin_comp * 2.*u_bar[3]], \
                                     [sin_comp * 2.*u_bar[0], -cos_comp * 2.*u_bar[1], -sin_comp * 2.*u_bar[2], cos_comp * 2.*u_bar[3]], \
                                     [-Kt * 2.*u_bar[0], Kt * 2.*u_bar[1], -Kt * 2.*u_bar[2], Kt * 2.*u_bar[3]]]) * dt
@@ -182,36 +207,39 @@ def tvlqr(xk, uk, Q, Qf, R, Knum):
     return Kc_list  # return the gain matrices Kc for each time step
 
 def compute_state_right_minus(x_1, x_2):
+    # x_1 and x_2 are both \in R^(13x1)
     rw_1 = x_1[:3]
     qwb_1 = x_1[3:7]
-    Rwb_1 = S3.Rq_mat(qwb_1)
     vb_1 = x_1[7:10]
     omegab_1 = x_1[10:13]
     rw_2 = x_2[:3]
     qwb_2 = x_2[3:7]
-    Rwb_2 = S3.Rq_mat(qwb_2)
     vb_2 = x_2[7:10]
     omegab_2 = x_2[10:13]
     rw_error = rw_1 - rw_2
-    Rwb_error = SO3.minus_right(Rwb_1, Rwb_2)
+    qwb_error = S3.minus_right(qwb_1, qwb_2)
+    # Rwb_1 = S3.Rq_mat(qwb_1)
+    # Rwb_2 = S3.Rq_mat(qwb_2)
+    # Rwb_error = SO3.minus_right(Rwb_1, Rwb_2)
     vb_error = vb_1 - vb_2
     omegab_error = omegab_1 - omegab_2
-    x_error = np.concatenate([rw_error, Rwb_error, vb_error, omegab_error])
+    x_error = np.concatenate([rw_error, qwb_error, vb_error, omegab_error])
     return x_error  # \in R^(12x1)
 
-def compute_state_right_plus(x_1, x_2):
-    rw_1 = x_1[:3]
-    qwb_1 = x_1[3:7]
-    vb_1 = x_1[7:10]
-    omegab_1 = x_1[10:13]
-    rw_2 = x_2[:3]
-    qwb_2 = x_2[3:7]
-    vb_2 = x_2[7:10]
-    omegab_2 = x_2[10:13]
-    rw_sum = rw_1 + rw_2
-    qwb_sum = S3.plus_right(qwb_1, qwb_2)
-    vb_sum = vb_1 + vb_2
-    omegab_sum = omegab_1 + omegab_2
+def compute_state_right_plus(x, dx):
+    # x is \in R^(13x1) and dx is \in R^(12x1)
+    rw = x[:3]
+    qwb = x[3:7]
+    vb = x[7:10]
+    omegab = x[10:13]
+    drw = dx[:3]
+    dqwb = dx[3:6]
+    dvb = dx[6:9]
+    domegab = dx[9:12]
+    rw_sum = rw + drw
+    qwb_sum = S3.plus_right(qwb, dqwb)
+    vb_sum = vb + dvb
+    omegab_sum = omegab + domegab
     x_sum = np.concatenate([rw_sum, qwb_sum, vb_sum, omegab_sum])
     return x_sum  # \in R^(13x1)
 
@@ -226,7 +254,7 @@ def run_quadrotor_regulate_configuration(x0, x_ref, u_bar, u_lim, Kinf, dt, tf):
         orientations.append(Rwb)
         u = u_bar - Kinf @ (compute_state_right_minus(x, x_ref))
         # u = 1.0 * np.pi/5. * np.array([1, 1, 1, 1])
-        u = np.clip(u, -u_lim, u_lim)
+        u = np.clip(u, 0.0, u_lim)
         x = euler(x, u, quadrotor_dynamics, dt)
     print(f"Final error: {compute_state_right_minus(x, x_ref)}")
     return positions, orientations
@@ -245,7 +273,7 @@ def run_quadrotor_track_trajectory(x0, xk, u_bar, u_lim, Kc, dt, tf):
         # x_noisy = x + noise
         # x_noisy[3:7] = x_noisy[3:7] / np.linalg.norm(x_noisy)
         u = u_bar - Kc[k] @ (compute_state_right_minus(x, xk[k]))
-        u = np.clip(u, -u_lim, u_lim)
+        u = np.clip(u, 0.0, u_lim)
         x = euler(x, u, quadrotor_dynamics, dt)
     return positions, orientations
 
@@ -254,43 +282,80 @@ def save_Kinf_mat(Kinf, file):
     for row in Kinf:
         formatted_row = ", ".join(f"{val:.8e}f" for val in row)
         lines.append(f"{{{formatted_row}}}")
-    cpp_struct_str = "static const float Kinf[4][12] = \n    {{\n"
-    cpp_struct_str += ",\n".join(f"      {line}" for line in lines)
-    cpp_struct_str += "\n    }};\n"
+    cpp_struct_str = "static const float Kinf[4][12] = {\n"
+    cpp_struct_str += ",\n".join(f"    {line}" for line in lines)
+    cpp_struct_str += "};\n"
     with open(file, "w") as f:
         f.write(cpp_struct_str)
     print(f"Kinf matrix saved to \"{file}\" in C-style struct format.")
 
+def rpy_to_quat(rpy):  # rpy is an array: [roll, pitch, yaw], in radians
+    roll, pitch, yaw = rpy[0], rpy[1], rpy[2]
+    cr = np.cos(0.5 * roll)
+    sr = np.sin(0.5 * roll)
+    cp = np.cos(0.5 * pitch)
+    sp = np.sin(0.5 * pitch)
+    cy = np.cos(0.5 * yaw)
+    sy = np.sin(0.5 * yaw)
+    w = cr * cp * cy + sr * sp * sy
+    x = sr * cp * cy - cr * sp * sy
+    y = cr * sp * cy + sr * cp * sy
+    z = cr * cp * sy - sr * sp * cy
+    return np.array([w, x, y, z])
 
-dt = 1e-3
+
+dt = 1e-2
 tf = 10
+# maybe adjust the cost matrices here
 Q = 1000. * np.eye(N)
 Qf = 1000. * np.eye(N)
 R = 0.001 * np.eye(M)
-phi0 = 0.0
-x0 = np.array([0.0, 0.0, 0.0, \
-                np.cos(phi0 / 2.), 0.0, 0.0, np.sin(phi0 / 2.), \
+r0 = np.array([0.0, 0.0, 0.0])
+rpy0 = np.array([0.0, 0.0, 0.0])
+q0 = rpy_to_quat(rpy0)
+x0 = np.block([r0, \
+                q0, \
                 0.0, 0.0, 0.0, \
                 0.0, 0.0, 0.0])
 u_ref = np.sqrt(m*g/4 / Kf) * np.ones(4)  # hovering control input
 
-phi_bar = 0.0
-x_bar = np.block([0.0, 0.0, 0.0, np.cos(phi_bar / 2.), 0.0, 0.0, np.sin(phi_bar / 2.), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+dt = 1e-2
+rpy_bar = np.array([0.5, 0.7, 1.0])
+q_bar = rpy_to_quat(rpy_bar)
+x_bar = np.block([1.5, 0.7, -1.3, q_bar, 1.3, 3.4, 2.5, -0.1, -10.5, 3.7])
 u_bar = np.copy(u_ref)
-A, B = linearize_euler(x_bar, u_bar, dt)
-Kinf = lqr(A, B, Q, Qf, R, round(tf / dt))
-print(f"Kinf: {np.round(Kinf, 5)}")
-r_ref = np.array([1.0, 1.0, 1.0])
-phi_ref = phi_bar
-q_ref = np.array([np.cos(phi_ref / 2.), 0.0, 0.0, np.sin(phi_ref / 2.)])
-x_ref = np.block([r_ref, \
-                  q_ref, \
-                  0.0, 0.0, 0.0, \
-                  0.0, 0.0, 0.0])
-positions, orientations = run_quadrotor_regulate_configuration(x0, x_ref, u_bar, u_lim, Kinf, dt, tf)
-save_Kinf_mat(Kinf, "Kinf.txt")
-quadrotor_visualize(positions, orientations, 0.01, int(1/(10*dt)), 0.25, body_yaw0, cam_onboard = False)
+A_num, B_num = finite_differences(euler_wrap, x_bar, u_bar, dt, 1e-5)
+A_an, B_an  = linearize_euler(x_bar, u_bar, dt)
 
+# print(np.round(A_an, 3))
+print(np.round(A_an - A_num, 2))
+print("‖A_num − A_an‖_∞ =", np.max(np.abs(A_num - A_an)))
+print("‖B_num − B_an‖_∞ =", np.max(np.abs(B_num - B_an)))
+# print("A_num − A_an =", np.abs(A_num - A_an))
+# print("B_num − B_an =", np.abs(B_num - B_an))
+
+# # regulate a certain crazyflie configuration (position and yaw orientation)
+# yaw_bar = 0.0
+# rpy_bar = np.array([0.0, 0.0, yaw_bar])
+# q_bar = rpy_to_quat(rpy_bar)
+# x_bar = np.block([0.0, 0.0, 0.0, q_bar, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+# u_bar = np.copy(u_ref)
+# A, B = linearize_euler(x_bar, u_bar, dt)
+# # A, B = finite_differences(euler_wrap, x_bar, u_bar, dt, 1e-5)
+# Kinf = lqr(A, B, Q, Qf, R, round(tf / dt))
+# print(f"Kinf: {np.round(Kinf, 5)}")
+# r_ref = np.array([1.0, 1.0, 1.0])
+# rpy_ref = np.array([0.0, 0.0, yaw_bar])
+# q_ref = rpy_to_quat(rpy_ref)
+# x_ref = np.block([r_ref, \
+#                     q_ref, \
+#                     0.0, 0.0, 0.0, \
+#                     0.0, 0.0, 0.0])
+# positions, orientations = run_quadrotor_regulate_configuration(x0, x_ref, u_bar, u_lim, Kinf, dt, tf)
+# save_Kinf_mat(Kinf, "Kinf.txt")
+# quadrotor_visualize(positions, orientations, 0.01, int(1/(10*dt)), 0.25, body_yaw0, cam_onboard = False)
+
+# # track a circular trajectory
 # total_time_vec = np.arange(0, tf, dt)
 # tt = 1/5 * tf
 # x_initial_traj = np.array([1.0, 2.0, 0.5, \
