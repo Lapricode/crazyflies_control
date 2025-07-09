@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 
-def quadrotor_visualize(positions, orientations, delay, traj_step, l, body_yaw0, cam_onboard = False):
+def quadrotor_visualize(positions, orientations, control_inputs, max_control_input, delay, traj_step, l, body_yaw0, cam_onboard = False):
     positions = np.asarray([positions[k] for k in range(0, len(positions), traj_step)] + [positions[-1]])
     N = positions.shape[0]
     trace_positions = []
@@ -22,8 +22,7 @@ def quadrotor_visualize(positions, orientations, delay, traj_step, l, body_yaw0,
     p_motor3 = np.array([0.0, -l, 0.0])
     p_motor4 = np.array([-l, 0.0, 0.0])
     body_points = body_orient0 @ np.vstack([p_body, p_antenna, p_motor1, p_motor2, p_motor3, p_motor4]).T
-    h = l / 4.0
-    vertical_offsets = np.array([[0.0, 0.0, h]] * 4)
+    controls_max_length = l
 
     # Setup plots
     fig = plt.figure(figsize = (14, 8))
@@ -49,14 +48,20 @@ def quadrotor_visualize(positions, orientations, delay, traj_step, l, body_yaw0,
     plt.ion()
     fig.canvas.mpl_connect('key_release_event', lambda event: [exit(0) if event.key == "q" else None])
     for k in range(N):
-        x = positions[k]
+        r = positions[k]
         R = orientations[k]
-        transformed_points = (R @ body_points).T + x[np.newaxis, :]
-        pB, pA, pM1, pM2, pM3, pM4 = transformed_points
-        motor_coords = np.vstack([pM1, pM2, pM3, pM4])
+        u = control_inputs[k]
+        transformed_body_points = (R @ body_points).T + r[np.newaxis, :]
+        pB, pA, pM1, pM2, pM3, pM4 = transformed_body_points
+        show_controls_lengths = controls_max_length * (u / max_control_input)**2
+        show_controls_points = np.copy(body_points[:, 2:])
+        show_controls_points[2, :] = show_controls_points[2, :] + show_controls_lengths
+        pC1, pC2, pC3, pC4 = (R @ show_controls_points).T + r[np.newaxis, :]
+        pMs = np.vstack([pM1, pM2, pM3, pM4])
+        pCs = np.vstack([pC1, pC2, pC3, pC4])
         if k >= N//4:
             trace_positions.pop(0)
-        trace_positions.append(x)
+        trace_positions.append(r)
         trace_positions_array = np.array(trace_positions)
 
         # Clear and update world plot
@@ -76,14 +81,13 @@ def quadrotor_visualize(positions, orientations, delay, traj_step, l, body_yaw0,
         ax_world.scatter(trace_positions_array[:, 0], trace_positions_array[:, 1], trace_positions_array[:, 2], c = 'k', s = 20, label = 'trace')
         ax_world.scatter(*pB, c = 'k', s = 50, label = 'body')
         ax_world.scatter(*pA, c = 'k', s = 20, label = 'body')
-        ax_world.scatter(motor_coords[:, 0], motor_coords[:, 1], motor_coords[:, 2], c = 'g', s = 50, label = 'motors')
+        ax_world.scatter(pMs[:, 0], pMs[:, 1], pMs[:, 2], c = 'g', s = 50, label = 'motors')
 
-        for i, pM in enumerate([pM1, pM2, pM3, pM4]):
-            ax_world.plot([pB[0], pM[0]], [pB[1], pM[1]], [pB[2], pM[2]], 'r-', linewidth = 2)
+        for i in range(4):
+            ax_world.plot([pB[0], pMs[i][0]], [pB[1], pMs[i][1]], [pB[2], pMs[i][2]], 'r-', linewidth = 2)
             ax_world.plot([pB[0], pA[0]], [pB[1], pA[1]], [pB[2], pA[2]], 'k-', linewidth = 1)
-            top_pt = pM + vertical_offsets[i]
-            ax_world.plot([pM[0], top_pt[0]], [pM[1], top_pt[1]], [pM[2], top_pt[2]], 'b-', linewidth = 2)
-            text_pos = pM + np.array([0, 0, h * 1.2])
+            ax_world.plot([pMs[i][0], pCs[i][0]], [pMs[i][1], pCs[i][1]], [pMs[i][2], pCs[i][2]], 'b-', linewidth = 2)
+            text_pos = pCs[i]
             ax_world.text(*text_pos, str(i + 1), fontsize = 12, color = 'blue', ha = 'center')
 
         if cam_onboard:
@@ -93,25 +97,24 @@ def quadrotor_visualize(positions, orientations, delay, traj_step, l, body_yaw0,
             ax_body.set_xlabel('X')
             ax_body.set_ylabel('Y')
             ax_body.set_zlabel('Z')
-            scale = 1.5 * l
-            xcor, ycor, zcor = x
-            ax_body.set_xlim(xcor - scale, xcor + scale)
-            ax_body.set_ylim(ycor - scale, ycor + scale)
-            ax_body.set_zlim(zcor - scale, zcor + scale)
+            view_scale = 1.5 * l
+            xcor, ycor, zcor = r
+            ax_body.set_xlim(xcor - view_scale, xcor + view_scale)
+            ax_body.set_ylim(ycor - view_scale, ycor + view_scale)
+            ax_body.set_zlim(zcor - view_scale, zcor + view_scale)
 
-            quad_points = (R @ body_points).T + x[np.newaxis, :]
-            pB_q, pA_q, pM1_q, pM2_q, pM3_q, pM4_q = quad_points
-            motor_coords_q = np.vstack([pM1_q, pM2_q, pM3_q, pM4_q])
+            quad_body_points = (R @ body_points).T + r[np.newaxis, :]
+            pB_q, pA_q, pM1_q, pM2_q, pM3_q, pM4_q = quad_body_points
+            pMs_q = np.vstack([pM1_q, pM2_q, pM3_q, pM4_q])
             ax_body.scatter(*pB_q, c = 'k', s = 50, label = 'body')
             ax_body.scatter(*pA_q, c = 'k', s = 20, label = 'body')
-            ax_body.scatter(motor_coords_q[:, 0], motor_coords_q[:, 1], motor_coords_q[:, 2], c = 'g', s = 50, label = 'motors')
+            ax_body.scatter(pMs[:, 0], pMs[:, 1], pMs[:, 2], c = 'g', s = 50, label = 'motors')
 
-            for i, pM_q in enumerate([pM1_q, pM2_q, pM3_q, pM4_q]):
-                ax_body.plot([pB_q[0], pM_q[0]], [pB_q[1], pM_q[1]], [pB_q[2], pM_q[2]], 'r-', linewidth = 2)
-                ax_body.plot([pB_q[0], pA_q[0]], [pB_q[1], pA_q[1]], [pB_q[2], pA_q[2]], 'k-', linewidth = 1)
-                top_pt = pM_q + vertical_offsets[i]
-                ax_body.plot([pM_q[0], top_pt[0]], [pM_q[1], top_pt[1]], [pM_q[2], top_pt[2]], 'b-', linewidth = 2)
-                text_pos = pM_q + np.array([0, 0, h * 1.2])
+            for i in range(4):
+                ax_body.plot([pB[0], pMs[i][0]], [pB[1], pMs[i][1]], [pB[2], pMs[i][2]], 'r-', linewidth = 2)
+                ax_body.plot([pB[0], pA[0]], [pB[1], pA[1]], [pB[2], pA[2]], 'k-', linewidth = 1)
+                ax_body.plot([pMs[i][0], pCs[i][0]], [pMs[i][1], pCs[i][1]], [pMs[i][2], pCs[i][2]], 'b-', linewidth = 2)
+                text_pos = pCs[i]
                 ax_body.text(*text_pos, str(i + 1), fontsize = 12, color = 'blue', ha = 'center')
 
         plt.pause(delay)

@@ -1,6 +1,7 @@
 import numpy as np
 from visualize_crazyfly import quadrotor_visualize
-from lie_theory_lib import SO3_rotation as SO3, S3_rotation as S3
+import SO3_rotation as SO3
+import S3_rotation as S3
 
 
 """
@@ -43,8 +44,8 @@ I = np.array([[16.6e-6, 0.83e-6, 0.72e-6],
                 [0.72e-6, 1.8e-6, 29.3e-6]])
 I_inv = np.linalg.inv(I)  # inverse of the inertia matrix
 body_yaw0 = -3/4 * np.pi  # assuming body_yaw0 is for the motor 1 at positive y direction, motor 2 at positive x direction and clockwise motor numbers
-Kf = 9/4 * 1e-8  # thrust coefficient in N/(rad/s)^2
-Kt = 0.00596 * Kf  # torque coefficient in N*m/(rad/s)^2
+Kf = 2.25e-8  # thrust coefficient in N/(rad/s)^2
+Kt = 1.34e-10  # torque coefficient in N*m/(rad/s)^2
 u_max = 25000. * (2. * np.pi / 60) * np.ones(4)  # the control input limits in rad/sec
 N = 12  # number of states in the quadrotor dynamics
 M = 4  # number of inputs in the quadrotor dynamics
@@ -310,8 +311,12 @@ def rpy_to_quat(rpy):  # rpy is an array: [roll, pitch, yaw], in radians
 dt = 1e-2
 tf = 10
 # maybe adjust the cost matrices here
-Q = 1000. * np.eye(N)
-# Q[3:6, 3:6] = 100.0 * np.eye(3)
+Q = 5000. * np.eye(N)
+Q[0:3, 0:3] = 10000. * np.eye(3)
+Q[0, 0] = 20000.
+Q[3:6, 3:6] = 7000. * np.eye(3)
+Q[6:9, 6:9] = 5000. * np.eye(3)
+Q[9:12, 9:12] = 10000. * np.eye(3)
 Qf = 1000. * np.eye(N)
 R = 0.001 * np.eye(M)
 r0 = np.array([0.0, 0.0, 0.0])
@@ -326,9 +331,9 @@ u_ref = np.sqrt(m*g/4 / Kf) * np.ones(4)  # hovering control input
 # dt = 1e-2
 # rpy_bar = np.array([0.5, 0.7, 1.0])
 # q_bar = rpy_to_quat(rpy_bar)
-# x_bar = np.block([1.5, 0.7, -1.3, q_bar, 1.7, 3.4, 2.5, -0.1, -10.5, 4.7])
+# x_bar = np.block([1.5, 0.7, -1.3, q_bar, 5.7, 3.4, 2.5, -10.1, -0.5, 4.7])
 # u_bar = np.copy(u_ref)
-# A_num, B_num = finite_differences(euler_wrap, x_bar, u_bar, dt, 1e-6)
+# A_num, B_num = finite_differences(euler_wrap, x_bar, u_bar, dt, 1e-5)
 # A_an, B_an  = linearize_euler(x_bar, u_bar, dt)
 
 # print("A_an: ", np.round(A_an, 2))
@@ -338,17 +343,21 @@ u_ref = np.sqrt(m*g/4 / Kf) * np.ones(4)  # hovering control input
 # print("‖B_num − B_an‖_∞ =", np.max(np.abs(B_num - B_an)))
 
 # regulate a certain crazyflie configuration (position and yaw orientation)
+r_bar = np.array([0.0, 0.0, 0.0])
 yaw_bar = 0.0
 rpy_bar = np.array([0.0, 0.0, yaw_bar])
 q_bar = rpy_to_quat(rpy_bar)
-x_bar = np.block([0.0, 0.0, 0.0, q_bar, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+x_bar = np.block([r_bar, \
+                    q_bar, \
+                    0.0, 0.0, 0.0, \
+                    0.0, 0.0, 0.0])
 u_bar = np.copy(u_ref)
 A, B = linearize_euler(x_bar, u_bar, dt)
 # A, B = finite_differences(euler_wrap, x_bar, u_bar, dt, 1e-5)
 Kinf = lqr(A, B, Q, Qf, R, round(tf / dt))
 print(f"Kinf: {np.round(Kinf, 5)}")
 r_ref = np.array([1.0, 1.0, 1.0])
-rpy_ref = np.array([0.0, 0.0, yaw_bar])
+rpy_ref = np.array([0.0, 0.0, 0.0])
 q_ref = rpy_to_quat(rpy_ref)
 x_ref = np.block([r_ref, \
                     q_ref, \
