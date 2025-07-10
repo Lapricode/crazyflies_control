@@ -76,6 +76,7 @@ def create_target_position():
 if __name__ == "__main__":
     logging.basicConfig(level = logging.ERROR)
     init_drivers()
+    default_height = 0.5  # default height at takeoff in meters
 
     uri = make_uri(0, 80, "2M", "E7E7E7E715")
     try:
@@ -94,10 +95,11 @@ if __name__ == "__main__":
     # scf.cf.param.set_value("motorPowerSet.m3", 0)
     # scf.cf.param.set_value("motorPowerSet.m4", 0)
     scf.cf.param.set_value("stabilizer.controller", 6)
+    scf.cf.param.set_value("stabilizer.estimator", 3)
     time.sleep(5)
     print(scf.cf.param.get_value("stabilizer.controller", timeout = 5))
+    print(scf.cf.param.get_value("stabilizer.estimator", timeout = 5))
 
-    default_height = 0.5  # in meters
     hlc = HighLevelCommander(scf.cf)
     # with PositionHlCommander(scf, default_height = default_height) as pc:
     time.sleep(1)
@@ -127,9 +129,9 @@ if __name__ == "__main__":
 
     # log_state_error = LogConfig(name = "State Error", period_in_ms = 100)
 
-    # scf.cf.console.receivedChar.add_callback(lambda text: print(text))
+    scf.cf.console.receivedChar.add_callback(lambda text: print(text))
 
-    log_state.start()
+    # log_state.start()
     # log_battery.start()
     # log_motors.start()
 
@@ -161,7 +163,7 @@ if __name__ == "__main__":
 
     # log_motors.stop()
     # log_battery.stop()
-    log_state.stop()
+    # log_state.stop()
 
     scf.close_link()
 

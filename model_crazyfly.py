@@ -311,13 +311,12 @@ def rpy_to_quat(rpy):  # rpy is an array: [roll, pitch, yaw], in radians
 dt = 1e-2
 tf = 10
 # maybe adjust the cost matrices here
-Q = 5000. * np.eye(N)
+Q = np.eye(N)
 Q[0:3, 0:3] = 10000. * np.eye(3)
-Q[0, 0] = 20000.
-Q[3:6, 3:6] = 7000. * np.eye(3)
-Q[6:9, 6:9] = 5000. * np.eye(3)
-Q[9:12, 9:12] = 10000. * np.eye(3)
-Qf = 1000. * np.eye(N)
+Q[3:6, 3:6] = 5000. * np.eye(3)
+Q[6:9, 6:9] = 1000. * np.eye(3)
+Q[9:12, 9:12] = 5000. * np.eye(3)
+Qf = 10000. * np.eye(N)
 R = 0.001 * np.eye(M)
 r0 = np.array([0.0, 0.0, 0.0])
 rpy0 = np.array([0.0, 0.0, 0.0])
