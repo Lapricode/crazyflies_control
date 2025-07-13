@@ -66,7 +66,8 @@ def quadrotor_dynamics(x, u):
                     Kt * (-u[0]**2 - u[2]**2 + u[1]**2 + u[3]**2)])  # torque in the body frame
     vb_dot = 1/m * F_b - np.cross(omegab, vb)  # linear acceleration in the body frame
     omegab_dot = I_inv @ (T_b - np.cross(omegab, I @ omegab))  # angular acceleration in the body frame
-    return rw_dot, Rwb_dot, vb_dot, omegab_dot
+    # return rw_dot, omegab, vb_dot, omegab_dot
+    return np.concatenate([rw_dot, omegab, vb_dot, omegab_dot])
 
 def quadrotor_dynamics_dx(x, u):
     A = np.zeros((N, N))
@@ -105,6 +106,8 @@ def finite_differences(f, x, u, dt, eps = 1e-5):
         fx_plus = f(compute_state_right_plus(x, ei), u, dt)
         fx_minus = f(compute_state_right_plus(x, -ei), u, dt)
         A_fd[:, i] = compute_state_right_minus(fx_plus, fx_minus) / (2*eps)
+        # fx_minus = f(x, u, dt)
+        # A_fd[:, i] = compute_state_right_minus(fx_plus, fx_minus) / eps
     B_fd = np.zeros((N, M))
     for j in range(M):
         ej = np.zeros(M)
@@ -112,26 +115,31 @@ def finite_differences(f, x, u, dt, eps = 1e-5):
         fu_plus = f(x, u + ej, dt)
         fu_minus = f(x, u - ej, dt)
         B_fd[:, j] = compute_state_right_minus(fu_plus, fu_minus) / (2*eps)
+        # fu_minus = f(x, u, dt)
+        # B_fd[:, j] = compute_state_right_minus(fu_plus, fu_minus) / eps
     return A_fd, B_fd
 
-# wrap your euler so its signature is (x, u, dt) → next x
+def euler(xk, uk, dynamics, dt):
+    # rw = xk[:3]
+    # qwb = xk[3:7]
+    # Rwb = S3.Rq_mat(qwb)
+    # vb = xk[7:10]
+    # omegab = xk[10:13]
+    # dyn = dynamics(xk, uk)
+    # rw_dot, omegab, vb_dot, omegab_dot = dyn[0:3], dyn[3:6], dyn[6:9], dyn[9:12]
+    # rw = np.copy(rw + rw_dot * dt)
+    # vb = np.copy(vb + vb_dot * dt)
+    # omegab = np.copy(omegab + omegab_dot * dt)
+    # # qwb = S3.plus_right(qwb, omegab * dt)
+    # # x = np.concatenate([rw, qwb, vb, omegab])
+    # Rwb = SO3.plus_right(Rwb, omegab * dt)
+    # x = np.concatenate([rw, SO3.qR_quat(Rwb), vb, omegab])
+    x = compute_state_right_plus(xk, dynamics(xk, uk) * dt)
+    return x
+
+# wrap euler so its signature is (x, u, dt) → next x
 def euler_wrap(x, u, dt):
     return euler(x, u, quadrotor_dynamics, dt)
-
-def euler(xk, uk, dynamics, dt):
-    rw = xk[:3]
-    qwb = xk[3:7]
-    vb = xk[7:10]
-    omegab = xk[10:13]
-    rw_dot, Rwb_dot, vb_dot, omegab_dot = dynamics(xk, uk)
-    rw = np.copy(rw + rw_dot * dt)
-    # Rwb = S3.Rq_mat(qwb)
-    # Rwb = SO3.plus_right(Rwb, omegab * dt)
-    qwb = S3.plus_right(qwb, omegab * dt)
-    vb = np.copy(vb + vb_dot * dt)
-    omegab = np.copy(omegab + omegab_dot * dt)
-    x = np.concatenate([rw, qwb, vb, omegab])
-    return x
 
 def linearize_euler(x_bar, u_bar, dt):
     rw = x_bar[:3]
@@ -166,11 +174,15 @@ def linearize_euler(x_bar, u_bar, dt):
 
 def runge_kutta_4th_order(xk, uk, dynamics, dt):
     f1 = dynamics(xk, uk)
-    f2 = dynamics(xk + f1 * dt / 2., uk)
-    f3 = dynamics(xk + f2 * dt / 2., uk)
-    f4 = dynamics(xk + f3 * dt, uk)
-    x = xk + dt / 6. * (f1 + 2. * f2 + 2. * f3 + f4)
+    f2 = dynamics(compute_state_right_plus(xk, f1 * dt / 2), uk)
+    f3 = dynamics(compute_state_right_plus(xk, f2 * dt / 2.), uk)
+    f4 = dynamics(compute_state_right_plus(xk, f3 * dt), uk)
+    x = compute_state_right_plus(xk, (f1 + 2. * f2 + 2. * f3 + f4) * dt / 6.)
     return x
+
+# wrap runge_kutta_4th_order so its signature is (x, u, dt) → next x
+def rk4_wrap(x, u, dt):
+    return runge_kutta_4th_order(x, u, quadrotor_dynamics, dt)
 
 def linearize_runge_kutta(x_bar, u_bar, dynamics, dt):
     A = np.zeros((N, N))
@@ -216,10 +228,11 @@ def compute_state_right_minus(x_1, x_2):
     vb_2 = x_2[7:10]
     omegab_2 = x_2[10:13]
     rw_error = rw_1 - rw_2
-    # qwb_error = S3.minus_right(qwb_1, qwb_2)
-    Rwb_error = SO3.minus_right(Rwb_1, Rwb_2)
     vb_error = vb_1 - vb_2
     omegab_error = omegab_1 - omegab_2
+    # qwb_error = S3.minus_right(qwb_1, qwb_2)
+    # x_error = np.concatenate([rw_error, qwb_error, vb_error, omegab_error])
+    Rwb_error = SO3.minus_right(Rwb_1, Rwb_2)
     x_error = np.concatenate([rw_error, Rwb_error, vb_error, omegab_error])
     return x_error  # \in R^(12x1)
 
@@ -236,10 +249,11 @@ def compute_state_right_plus(x, dx):
     dvb = dx[6:9]
     domegab = dx[9:12]
     rw_sum = rw + drw
-    # qwb_sum = S3.plus_right(qwb, dqwb)
-    Rwb_sum = SO3.plus_right(Rwb, dRwb)
     vb_sum = vb + dvb
     omegab_sum = omegab + domegab
+    # qwb_sum = S3.plus_right(qwb, dqwb)
+    # x_sum = np.concatenate([rw_sum, qwb_sum, vb_sum, omegab_sum])
+    Rwb_sum = SO3.plus_right(Rwb, dRwb)
     x_sum = np.concatenate([rw_sum, SO3.qR_quat(Rwb_sum), vb_sum, omegab_sum])
     return x_sum  # \in R^(13x1)
 
@@ -258,6 +272,7 @@ def run_quadrotor_regulate_configuration(x0, x_ref, u_bar, u_max, Kinf, dt, tf):
         u = np.clip(u, 0.0, u_max)
         control_inputs.append(u)
         x = euler(x, u, quadrotor_dynamics, dt)
+        # x = runge_kutta_4th_order(x, u, quadrotor_dynamics, dt)
     print(f"Final error: {compute_state_right_minus(x, x_ref)}")
     return positions, orientations, control_inputs
 
@@ -279,6 +294,7 @@ def run_quadrotor_track_trajectory(x0, xk, u_bar, u_max, Kc, dt, tf):
         u = np.clip(u, 0.0, u_max)
         control_inputs.append(u)
         x = euler(x, u, quadrotor_dynamics, dt)
+        # x = runge_kutta_4th_order(x, u, quadrotor_dynamics, dt)
     return positions, orientations, control_inputs
 
 def save_Kinf_mat(Kinf, file):
@@ -309,11 +325,36 @@ def rpy_to_quat(rpy):  # rpy is an array: [roll, pitch, yaw], in radians
 
 
 dt = 1e-2
-tf = 10
-# maybe adjust the cost matrices here
+yaw_bar = 0.0
+q_bar = rpy_to_quat(np.array([0.0, 0.0, yaw_bar]))
+x_bar = np.block([0.0, 0.0, 0.0, \
+                    q_bar, \
+                    0.0, 0.0, 0.0, \
+                    0.0, 0.0, 0.0])
+u_bar = np.sqrt(m*g/4 / Kf) * np.ones(4)
+# rpy_bar = np.array([0.5, 0.7, 1.0])
+# q_bar = rpy_to_quat(rpy_bar)
+# x_bar = 5. * np.random.randn(13,)
+# x_bar[3:7] = q_bar
+# u_bar = 1000. * np.abs(np.random.randn(4,))
+A_num, B_num = finite_differences(euler_wrap, x_bar, u_bar, dt, 1e-5)
+A_an, B_an  = linearize_euler(x_bar, u_bar, dt)
+# dec_digits_shown = 3
+# print("A_an: ", np.round(A_an, dec_digits_shown))
+# print("A_num: ", np.round(A_num, dec_digits_shown))
+# print(np.round(A_an - A_num, dec_digits_shown))
+# print("B_an: ", np.round(B_an, dec_digits_shown))
+# print("B_num: ", np.round(B_num, dec_digits_shown))
+# print(np.round(B_an - B_num, dec_digits_shown))
+print("x_bar =", x_bar)
+print("u_bar =", u_bar)
+print("‖A_num − A_an‖_∞ =", np.max(np.abs(A_num - A_an)))
+print("‖B_num − B_an‖_∞ =", np.max(np.abs(B_num - B_an)))
+
+# setup the cost matrices of the LQR controller, and the initial state
 Q = np.eye(N)
 Q[0:3, 0:3] = 10000. * np.eye(3)
-Q[3:6, 3:6] = 5000. * np.eye(3)
+Q[3:6, 3:6] = 10000. * np.eye(3)
 Q[6:9, 6:9] = 1000. * np.eye(3)
 Q[9:12, 9:12] = 5000. * np.eye(3)
 Qf = 10000. * np.eye(N)
@@ -325,23 +366,10 @@ x0 = np.block([r0, \
                 q0, \
                 0.0, 0.0, 0.0, \
                 0.0, 0.0, 0.0])
-u_ref = np.sqrt(m*g/4 / Kf) * np.ones(4)  # hovering control input
-
-# dt = 1e-2
-# rpy_bar = np.array([0.5, 0.7, 1.0])
-# q_bar = rpy_to_quat(rpy_bar)
-# x_bar = np.block([1.5, 0.7, -1.3, q_bar, 5.7, 3.4, 2.5, -10.1, -0.5, 4.7])
-# u_bar = np.copy(u_ref)
-# A_num, B_num = finite_differences(euler_wrap, x_bar, u_bar, dt, 1e-5)
-# A_an, B_an  = linearize_euler(x_bar, u_bar, dt)
-
-# print("A_an: ", np.round(A_an, 2))
-# print("A_num: ", np.round(A_num, 2))
-# print(np.round(A_an - A_num, 2))
-# print("‖A_num − A_an‖_∞ =", np.max(np.abs(A_num - A_an)))
-# print("‖B_num − B_an‖_∞ =", np.max(np.abs(B_num - B_an)))
 
 # regulate a certain crazyflie configuration (position and yaw orientation)
+dt = 1e-2
+tf = 10
 r_bar = np.array([0.0, 0.0, 0.0])
 yaw_bar = 0.0
 rpy_bar = np.array([0.0, 0.0, yaw_bar])
@@ -350,9 +378,10 @@ x_bar = np.block([r_bar, \
                     q_bar, \
                     0.0, 0.0, 0.0, \
                     0.0, 0.0, 0.0])
-u_bar = np.copy(u_ref)
+u_bar = np.sqrt(m*g/4 / Kf) * np.ones(4)  # hovering control input
 A, B = linearize_euler(x_bar, u_bar, dt)
 # A, B = finite_differences(euler_wrap, x_bar, u_bar, dt, 1e-5)
+# A, B = finite_differences(rk4_wrap, x_bar, u_bar, dt, 1e-5)
 Kinf = lqr(A, B, Q, Qf, R, round(tf / dt))
 print(f"Kinf: {np.round(Kinf, 5)}")
 r_ref = np.array([1.0, 1.0, 1.0])
@@ -362,11 +391,14 @@ x_ref = np.block([r_ref, \
                     q_ref, \
                     0.0, 0.0, 0.0, \
                     0.0, 0.0, 0.0])
+u_ref = np.sqrt(m*g/4 / Kf) * np.ones(4)  # hovering control input
 positions, orientations, control_inputs = run_quadrotor_regulate_configuration(x0, x_ref, u_bar, u_max, Kinf, dt, tf)
 save_Kinf_mat(Kinf, "Kinf.txt")
 quadrotor_visualize(positions, orientations, control_inputs, u_max, 0.01, int(1/(10*dt)), 0.25, body_yaw0, cam_onboard = True)
 
 # # track a circular trajectory
+# dt = 1e-2
+# tf = 10
 # total_time_vec = np.arange(0, tf, dt)
 # tt = 1/5 * tf
 # x_initial_traj = np.array([1.0, 2.0, 0.5, \

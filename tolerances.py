@@ -1,2 +1,2 @@
-small_case_tol = 1e-6
-error_tol = 1e-6
+small_case_tol = 1e-10
+error_tol = 1e-10
