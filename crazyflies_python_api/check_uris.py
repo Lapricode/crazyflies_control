@@ -28,7 +28,7 @@ def detect_crazyflies_uris(tested_uris):
     logging.basicConfig(level = logging.ERROR)
     init_drivers()
 
-    working_uris = []
+    detected_uris = []
     failed_uris = []
 
     for uri in tested_uris:
@@ -36,7 +36,7 @@ def detect_crazyflies_uris(tested_uris):
             print(f"Trying to connect to {uri} ...")
             with SyncCrazyflie(uri, cf = Crazyflie(rw_cache = "./cache")) as scf:
                 print(f"\t - Successfully connected to {uri}!")
-                working_uris.append(uri)
+                detected_uris.append(uri)
                 check_connection_leds_signal(scf)
                 log_battery = LogConfig(name = "Battery", period_in_ms = 1000)
                 log_battery.add_variable("pm.batteryLevel", "uint8_t")
@@ -50,8 +50,8 @@ def detect_crazyflies_uris(tested_uris):
             failed_uris.append(uri)
     
     print("\n--- Crazyflies addresses check ---")
-    print("Working URIs:")
-    for uri in working_uris:
+    print("Detected URIs:")
+    for uri in detected_uris:
         print(f"  ✔ {uri}")
     print("Failed URIs:")
     for uri in failed_uris:
@@ -65,19 +65,19 @@ uris = [
     make_uri(0, 80, "2M", "E7E7E7E704"), \
     make_uri(0, 80, "2M", "E7E7E7E705"), \
     make_uri(0, 80, "2M", "E7E7E7E706"), \
-    make_uri(0, 80, "2M", "E7E7E7E707"), \
-    make_uri(0, 80, "2M", "E7E7E7E708"), \
-    make_uri(0, 80, "2M", "E7E7E7E709"), \
-    make_uri(0, 80, "2M", "E7E7E7E710"), \
-    make_uri(0, 80, "2M", "E7E7E7E711"), \
-    make_uri(0, 80, "2M", "E7E7E7E712"), \
-    make_uri(0, 80, "2M", "E7E7E7E713"), \
-    make_uri(0, 80, "2M", "E7E7E7E714"), \
-    make_uri(0, 80, "2M", "E7E7E7E715"), \
-    make_uri(0, 80, "2M", "E7E7E7E716"), \
-    make_uri(0, 80, "2M", "E7E7E7E717"), \
-    make_uri(0, 80, "2M", "E7E7E7E718"), \
-    make_uri(0, 80, "2M", "E7E7E7E719"), \
-    make_uri(0, 80, "2M", "E7E7E7E720"), \
+    # make_uri(0, 80, "2M", "E7E7E7E707"), \
+    # make_uri(0, 80, "2M", "E7E7E7E708"), \
+    # make_uri(0, 80, "2M", "E7E7E7E709"), \
+    # make_uri(0, 80, "2M", "E7E7E7E710"), \
+    # make_uri(0, 80, "2M", "E7E7E7E711"), \
+    # make_uri(0, 80, "2M", "E7E7E7E712"), \
+    # make_uri(0, 80, "2M", "E7E7E7E713"), \
+    # make_uri(0, 80, "2M", "E7E7E7E714"), \
+    # make_uri(0, 80, "2M", "E7E7E7E715"), \
+    # make_uri(0, 80, "2M", "E7E7E7E716"), \
+    # make_uri(0, 80, "2M", "E7E7E7E717"), \
+    # make_uri(0, 80, "2M", "E7E7E7E718"), \
+    # make_uri(0, 80, "2M", "E7E7E7E719"), \
+    # make_uri(0, 80, "2M", "E7E7E7E720"), \
 ]
 detect_crazyflies_uris(uris)

@@ -78,7 +78,7 @@ if __name__ == "__main__":
     init_drivers()
     default_height = 0.5  # default height at takeoff in meters
 
-    uri = make_uri(0, 80, "2M", "E7E7E7E715")
+    uri = make_uri(0, 80, "2M", "E7E7E7E701")
     try:
         scf = SyncCrazyflie(uri, cf = Crazyflie(rw_cache = "./cache"))
         scf.open_link()
