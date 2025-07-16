@@ -46,7 +46,7 @@ I_inv = np.linalg.inv(I)  # inverse of the inertia matrix
 body_yaw0 = -3/4 * np.pi  # assuming body_yaw0 is for the motor 1 at positive y direction, motor 2 at positive x direction and clockwise motor numbers
 Kf = 2.25e-8  # thrust coefficient in N/(rad/s)^2
 Kt = 1.34e-10  # torque coefficient in N*m/(rad/s)^2
-u_max = 25000. * (2. * np.pi / 60) * np.ones(4)  # the control input limits in rad/sec
+u_max = 25000. * (2. * np.pi / 60) * np.ones(4)  # the maximum rotational speeds of the rotors (control inputs) in rad/sec
 N = 12  # number of states in the quadrotor dynamics
 M = 4  # number of inputs in the quadrotor dynamics
 
@@ -268,7 +268,6 @@ def run_quadrotor_regulate_configuration(x0, x_ref, u_bar, u_max, Kinf, dt, tf):
         positions.append(rw)
         orientations.append(Rwb)
         u = u_bar - Kinf @ (compute_state_right_minus(x, x_ref))
-        # u = 1.0 * np.pi/5. * np.array([1, 1, 1, 1])
         u = np.clip(u, 0.0, u_max)
         control_inputs.append(u)
         x = euler(x, u, quadrotor_dynamics, dt)
@@ -394,7 +393,7 @@ x_ref = np.block([r_ref, \
                     0.0, 0.0, 0.0])
 u_ref = np.sqrt(m*g/4 / Kf) * np.ones(4)  # hovering control input
 positions, orientations, control_inputs = run_quadrotor_regulate_configuration(x0, x_ref, u_bar, u_max, Kinf, dt, tf)
-save_Kinf_mat(Kinf, "Kinf.txt")
+save_Kinf_mat(Kinf, "Kinf_speeds.txt")
 quadrotor_visualize(positions, orientations, control_inputs, u_max, 0.01, int(1/(10*dt)), 0.25, body_yaw0, cam_onboard = True)
 
 # # track a circular trajectory

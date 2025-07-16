@@ -46,7 +46,8 @@ I_inv = np.linalg.inv(I)  # inverse of the inertia matrix
 body_yaw0 = -3/4 * np.pi  # assuming body_yaw0 is for the motor 1 at positive y direction, motor 2 at positive x direction and clockwise motor numbers
 Kf = 2.25e-8  # thrust coefficient in N/(rad/s)^2
 Kt = 1.34e-10  # torque coefficient in N*m/(rad/s)^2
-u_max = 25000. * (2. * np.pi / 60) * np.ones(4)  # the control input limits in rad/sec
+rot_speeds_max = 25000. * (2. * np.pi / 60) * np.ones(4)  # the maximum rotational speeds of the rotors in rad/sec
+u_max = Kf * rot_speeds_max**2  # the maximum thrusts (control inputs) the rotors can provide in N
 N = 12  # number of states in the quadrotor dynamics
 M = 4  # number of inputs in the quadrotor dynamics
 
@@ -58,12 +59,12 @@ def quadrotor_dynamics(x, u):
     Rwb = S3.Rq_mat(qwb)  # rotation matrix of the body frame w.r.t. the world frame
     rw_dot = Rwb @ vb  # linear velocity in the world frame
     Rwb_dot = Rwb @ SO3.hat(omegab)  # derivative of the rotation matrix of the body frame w.r.t. the world frame
-    F_b = Rwb.T @ np.array([0, 0, -m * g]) + np.array([0, 0, Kf * np.sum(u**2)])  # force in the body frame
-    T13 = l * Kf * (u[0]**2 - u[2]**2)
-    T42 = l * Kf * (u[3]**2 - u[1]**2)
+    F_b = Rwb.T @ np.array([0, 0, -m * g]) + np.array([0, 0, np.sum(u)])  # force in the body frame
+    T13 = l * (u[0] - u[2])
+    T42 = l * (u[3] - u[1])
     T_b = np.array([T13 * np.cos(body_yaw0) - T42 * np.sin(body_yaw0), \
                     T13 * np.sin(body_yaw0) + T42 * np.cos(body_yaw0), \
-                    Kt * (-u[0]**2 - u[2]**2 + u[1]**2 + u[3]**2)])  # torque in the body frame
+                    Kt/Kf * (-u[0] - u[2] + u[1] + u[3])])  # torque in the body frame
     vb_dot = 1/m * F_b - np.cross(omegab, vb)  # linear acceleration in the body frame
     omegab_dot = I_inv @ (T_b - np.cross(omegab, I @ omegab))  # angular acceleration in the body frame
     # return rw_dot, omegab, vb_dot, omegab_dot
@@ -90,12 +91,12 @@ def quadrotor_dynamics_dx(x, u):
 
 def quadrotor_dynamics_du(x, u):
     B = np.zeros((N, M))
-    B[8, :] = Kf/m * 2.*u
-    cos_comp = l*Kf * np.cos(body_yaw0)
-    sin_comp = l*Kf * np.sin(body_yaw0)
-    B[9:12, :] = I_inv @ np.array([[cos_comp * 2.*u[0], sin_comp * 2.*u[1], -cos_comp * 2.*u[2], -sin_comp * 2.*u[3]], \
-                                    [sin_comp * 2.*u[0], -cos_comp * 2.*u[1], -sin_comp * 2.*u[2], cos_comp * 2.*u[3]], \
-                                    [-Kt * 2.*u[0], Kt * 2.*u[1], -Kt * 2.*u[2], Kt * 2.*u[3]]])
+    B[8, :] = 1/m * np.ones(4,)
+    cos_comp = l * np.cos(body_yaw0)
+    sin_comp = l * np.sin(body_yaw0)
+    B[9:12, :] = I_inv @ np.array([[cos_comp, sin_comp, -cos_comp, -sin_comp], \
+                                    [sin_comp, -cos_comp, -sin_comp, cos_comp], \
+                                    [-Kt/Kf, Kt/Kf, -Kt/Kf, Kt/Kf]])
     return B
 
 def finite_differences(f, x, u, dt, eps = 1e-5):
@@ -164,12 +165,12 @@ def linearize_euler(x_bar, u_bar, dt):
     A[9:12, 9:12] = np.eye(3) - I_inv @ (omegab_hat @ I - SO3.vec_hat(I @ omegab)) * dt
     # B Jacobian for the control input is an N x M matrix
     B = np.zeros((N, M))
-    B[8, :] = Kf/m * 2.*u_bar * dt
-    cos_comp = l * Kf * np.cos(body_yaw0)
-    sin_comp = l * Kf * np.sin(body_yaw0)
-    B[9:12, :] = I_inv @ np.array([[cos_comp * 2.*u_bar[0], sin_comp * 2.*u_bar[1], -cos_comp * 2.*u_bar[2], -sin_comp * 2.*u_bar[3]], \
-                                    [sin_comp * 2.*u_bar[0], -cos_comp * 2.*u_bar[1], -sin_comp * 2.*u_bar[2], cos_comp * 2.*u_bar[3]], \
-                                    [-Kt * 2.*u_bar[0], Kt * 2.*u_bar[1], -Kt * 2.*u_bar[2], Kt * 2.*u_bar[3]]]) * dt
+    B[8, :] = 1/m * np.ones(4,) * dt
+    cos_comp = l * np.cos(body_yaw0)
+    sin_comp = l * np.sin(body_yaw0)
+    B[9:12, :] = I_inv @ np.array([[cos_comp, sin_comp, -cos_comp, -sin_comp], \
+                                    [sin_comp, -cos_comp, -sin_comp, cos_comp], \
+                                    [-Kt/Kf, Kt/Kf, -Kt/Kf, Kt/Kf]]) * dt
     return A, B
 
 def runge_kutta_4th_order(xk, uk, dynamics, dt):
@@ -268,7 +269,6 @@ def run_quadrotor_regulate_configuration(x0, x_ref, u_bar, u_max, Kinf, dt, tf):
         positions.append(rw)
         orientations.append(Rwb)
         u = u_bar - Kinf @ (compute_state_right_minus(x, x_ref))
-        # u = 1.0 * np.pi/5. * np.array([1, 1, 1, 1])
         u = np.clip(u, 0.0, u_max)
         control_inputs.append(u)
         x = euler(x, u, quadrotor_dynamics, dt)
@@ -331,12 +331,12 @@ x_bar = np.block([0.0, 0.0, 0.0, \
                     q_bar, \
                     0.0, 0.0, 0.0, \
                     0.0, 0.0, 0.0])
-u_bar = np.sqrt(m*g/4 / Kf) * np.ones(4)
+u_bar = m*g/4 * np.ones(4)
 # rpy_bar = np.array([0.5, 0.7, 1.0])
 # q_bar = rpy_to_quat(rpy_bar)
 # x_bar = 5. * np.random.randn(13,)
 # x_bar[3:7] = q_bar
-# u_bar = 1000. * np.abs(np.random.randn(4,))
+# u_bar = 1. * np.abs(np.random.randn(4,))
 A_num, B_num = finite_differences(euler_wrap, x_bar, u_bar, dt, 1e-5)
 A_an, B_an  = linearize_euler(x_bar, u_bar, dt)
 # dec_digits_shown = 3
@@ -353,13 +353,12 @@ print("‖B_num − B_an‖_∞ =", np.max(np.abs(B_num - B_an)))
 
 # setup the cost matrices of the LQR controller, and the initial state
 Q = np.eye(N)
-Q[0, 0] = 30000.
-Q[1:3, 1:3] = 10000. * np.eye(2)
-Q[3:6, 3:6] = 10000. * np.eye(3)
-Q[6:9, 6:9] = 3000. * np.eye(3)
-Q[9:12, 9:12] = 5000. * np.eye(3)
-Qf = 10000. * np.eye(N)
-R = 0.002 * np.eye(M)
+Q[0:3, 0:3] = 1000. * np.eye(3)
+Q[3:6, 3:6] = 1000. * np.eye(3)
+Q[6:9, 6:9] = 300. * np.eye(3)
+Q[9:12, 9:12] = 500. * np.eye(3)
+Qf = 1000. * np.eye(N)
+R = 100. * np.eye(M)
 r0 = np.array([0.0, 0.0, 0.0])
 rpy0 = np.array([0.0, 0.0, 0.0])
 q0 = rpy_to_quat(rpy0)
@@ -379,7 +378,7 @@ x_bar = np.block([r_bar, \
                     q_bar, \
                     0.0, 0.0, 0.0, \
                     0.0, 0.0, 0.0])
-u_bar = np.sqrt(m*g/4 / Kf) * np.ones(4)  # hovering control input
+u_bar = m*g/4 * np.ones(4)  # hovering control input
 A, B = linearize_euler(x_bar, u_bar, dt)
 # A, B = finite_differences(euler_wrap, x_bar, u_bar, dt, 1e-5)
 # A, B = finite_differences(rk4_wrap, x_bar, u_bar, dt, 1e-5)
@@ -392,9 +391,9 @@ x_ref = np.block([r_ref, \
                     q_ref, \
                     0.0, 0.0, 0.0, \
                     0.0, 0.0, 0.0])
-u_ref = np.sqrt(m*g/4 / Kf) * np.ones(4)  # hovering control input
-positions, orientations, control_inputs = run_quadrotor_regulate_configuration(x0, x_ref, u_bar, u_max, Kinf, dt, tf)
-save_Kinf_mat(Kinf, "Kinf.txt")
+u_ref = m*g/4 * np.ones(4)  # hovering control input
+positions, orientations, control_inputs = run_quadrotor_regulate_configuration(x0, x_ref, u_ref, u_max, Kinf, dt, tf)
+save_Kinf_mat(Kinf, "Kinf_thrusts.txt")
 quadrotor_visualize(positions, orientations, control_inputs, u_max, 0.01, int(1/(10*dt)), 0.25, body_yaw0, cam_onboard = True)
 
 # # track a circular trajectory
