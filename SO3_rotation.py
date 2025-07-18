@@ -172,8 +172,8 @@ def jacobian_left_inverse(tau):
 def jacobian_plus_right_1(R, tau):
     theta, u = decompose_cartesian_element(tau)
     u_hat = vec_hat(u)
-    R = np.eye(3) + np.sin(theta) * u_hat + (1. - np.cos(theta)) * u_hat @ u_hat
-    return R.T
+    R_theta = np.eye(3) + np.sin(theta) * u_hat + (1. - np.cos(theta)) * u_hat @ u_hat
+    return R_theta.T
 
 def jacobian_plus_right_2(R, tau):
     return jacobian_right(tau)

@@ -70,6 +70,7 @@ def quadrotor_dynamics(x, u):
     return np.concatenate([rw_dot, omegab, vb_dot, omegab_dot])
 
 def quadrotor_dynamics_dx(x, u):
+    # A Jacobian for the state is an N x N matrix
     A = np.zeros((N, N))
     rw = x[:3]
     qwb = x[3:7]
@@ -80,8 +81,8 @@ def quadrotor_dynamics_dx(x, u):
     omegab_hat = SO3.vec_hat(omegab)
     A[0:3, 3:6] = -Rwb @ vb_hat
     A[0:3, 6:9] = Rwb
-    # A[3:6, 3:6] = np.eye(3)
-    # A[3:6, 9:12] = np.eye(3)
+    # A[3:6, 3:6] = SO3.jacobian_rotation_action_1(Rwb, omegab)
+    # A[3:6, 9:12] = SO3.jacobian_rotation_action_2(Rwb, omegab)
     A[6:9, 3:6] = Rwb.T @ SO3.vec_hat(np.array([0., 0., -g])) @ Rwb
     A[6:9, 6:9] = -omegab_hat
     A[6:9, 9:12] = vb_hat
@@ -89,6 +90,7 @@ def quadrotor_dynamics_dx(x, u):
     return A
 
 def quadrotor_dynamics_du(x, u):
+    # B Jacobian for the control input is an N x M matrix
     B = np.zeros((N, M))
     B[8, :] = Kf/m * 2.*u
     cos_comp = l*Kf * np.cos(body_yaw0)
@@ -120,20 +122,6 @@ def finite_differences(f, x, u, dt, eps = 1e-5):
     return A_fd, B_fd
 
 def euler(xk, uk, dynamics, dt):
-    # rw = xk[:3]
-    # qwb = xk[3:7]
-    # Rwb = S3.Rq_mat(qwb)
-    # vb = xk[7:10]
-    # omegab = xk[10:13]
-    # dyn = dynamics(xk, uk)
-    # rw_dot, omegab, vb_dot, omegab_dot = dyn[0:3], dyn[3:6], dyn[6:9], dyn[9:12]
-    # rw = np.copy(rw + rw_dot * dt)
-    # vb = np.copy(vb + vb_dot * dt)
-    # omegab = np.copy(omegab + omegab_dot * dt)
-    # # qwb = S3.plus_right(qwb, omegab * dt)
-    # # x = np.concatenate([rw, qwb, vb, omegab])
-    # Rwb = SO3.plus_right(Rwb, omegab * dt)
-    # x = np.concatenate([rw, SO3.qR_quat(Rwb), vb, omegab])
     x = compute_state_right_plus(xk, dynamics(xk, uk) * dt)
     return x
 
@@ -142,34 +130,15 @@ def euler_wrap(x, u, dt):
     return euler(x, u, quadrotor_dynamics, dt)
 
 def linearize_euler(x_bar, u_bar, dt):
-    rw = x_bar[:3]
+    A = np.eye(N) + quadrotor_dynamics_dx(x_bar, u_bar) * dt
     qwb = x_bar[3:7]
     Rwb = S3.Rq_mat(qwb)
-    vb = x_bar[7:10]
     omegab = x_bar[10:13]
-    vb_hat = SO3.vec_hat(vb)
-    omegab_hat = SO3.vec_hat(omegab)
-    # A Jacobian for the state is an N x N matrix
-    A = np.zeros((N, N))
-    A[0:3, 0:3] = np.eye(3)
-    A[0:3, 3:6] = -Rwb @ vb_hat * dt
-    A[0:3, 6:9] = Rwb * dt
     A[3:6, 3:6] = SO3.jacobian_plus_right_1(Rwb, omegab * dt)
     A[3:6, 9:12] = SO3.jacobian_plus_right_2(Rwb, omegab * dt) * dt
     # A[3:6, 3:6] = S3.jacobian_plus_right_1(qwb, omegab * dt)
     # A[3:6, 9:12] = S3.jacobian_plus_right_2(qwb, omegab * dt) * dt
-    A[6:9, 3:6] = Rwb.T @ SO3.vec_hat(np.array([0., 0., -g])) @ Rwb * dt
-    A[6:9, 6:9] = np.eye(3) - omegab_hat * dt
-    A[6:9, 9:12] = vb_hat * dt
-    A[9:12, 9:12] = np.eye(3) - I_inv @ (omegab_hat @ I - SO3.vec_hat(I @ omegab)) * dt
-    # B Jacobian for the control input is an N x M matrix
-    B = np.zeros((N, M))
-    B[8, :] = Kf/m * 2.*u_bar * dt
-    cos_comp = l * Kf * np.cos(body_yaw0)
-    sin_comp = l * Kf * np.sin(body_yaw0)
-    B[9:12, :] = I_inv @ np.array([[cos_comp * 2.*u_bar[0], sin_comp * 2.*u_bar[1], -cos_comp * 2.*u_bar[2], -sin_comp * 2.*u_bar[3]], \
-                                    [sin_comp * 2.*u_bar[0], -cos_comp * 2.*u_bar[1], -sin_comp * 2.*u_bar[2], cos_comp * 2.*u_bar[3]], \
-                                    [-Kt * 2.*u_bar[0], Kt * 2.*u_bar[1], -Kt * 2.*u_bar[2], Kt * 2.*u_bar[3]]]) * dt
+    B = quadrotor_dynamics_du(x_bar, u_bar) * dt
     return A, B
 
 def runge_kutta_4th_order(xk, uk, dynamics, dt):
@@ -352,13 +321,13 @@ print("‖B_num − B_an‖_∞ =", np.max(np.abs(B_num - B_an)))
 
 # setup the cost matrices of the LQR controller, and the initial state
 Q = np.eye(N)
-Q[0, 0] = 30000.
+Q[0, 0] = 100000.
 Q[1:3, 1:3] = 10000. * np.eye(2)
 Q[3:6, 3:6] = 10000. * np.eye(3)
 Q[6:9, 6:9] = 3000. * np.eye(3)
 Q[9:12, 9:12] = 5000. * np.eye(3)
 Qf = 10000. * np.eye(N)
-R = 0.002 * np.eye(M)
+R = 0.001 * np.eye(M)
 r0 = np.array([0.0, 0.0, 0.0])
 rpy0 = np.array([0.0, 0.0, 0.0])
 q0 = rpy_to_quat(rpy0)

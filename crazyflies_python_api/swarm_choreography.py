@@ -91,7 +91,10 @@ def run_circle_sequence(scf, flight_time):
     for k in range(steps):
         phi_circle = 2.0*np.pi*circle_freq * k*dt + phi0
         phi_up_down = 2.0*np.pi*up_down_freq * k*dt
-        commander.go_to(r * np.cos(phi_circle), r * np.sin(phi_circle), h + up_down_dist * np.sin(phi_up_down), 0.0, dt, relative = False)
+        if cf_num % 2 == 0:
+            commander.go_to(r * np.cos(phi_circle), r * np.sin(phi_circle), h + up_down_dist * np.sin(phi_up_down), 0.0, dt, relative = False)
+        else:
+            commander.go_to(r * np.cos(phi_circle), r * np.sin(phi_circle), h - up_down_dist * np.sin(phi_up_down), 0.0, dt, relative = False)
         time.sleep(dt)
 
 

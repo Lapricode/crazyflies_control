@@ -53,7 +53,7 @@ def quadrotor_visualize(positions, orientations, control_inputs, max_control_inp
         u = control_inputs[k]
         transformed_body_points = (R @ body_points).T + r[np.newaxis, :]
         pB, pA, pM1, pM2, pM3, pM4 = transformed_body_points
-        show_controls_lengths = controls_max_length * (u / max_control_input)**2
+        show_controls_lengths = controls_max_length * (u / max_control_input)
         show_controls_points = np.copy(body_points[:, 2:])
         show_controls_points[2, :] = show_controls_points[2, :] + show_controls_lengths
         pC1, pC2, pC3, pC4 = (R @ show_controls_points).T + r[np.newaxis, :]

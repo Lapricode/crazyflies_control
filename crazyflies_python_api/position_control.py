@@ -78,13 +78,13 @@ if __name__ == "__main__":
     init_drivers()
     default_height = 0.5  # default height at takeoff in meters
 
-    uri = make_uri(0, 80, "2M", "E7E7E7E701")
+    uri = make_uri(0, 80, "2M", "E7E7E7E704")
     try:
         scf = SyncCrazyflie(uri, cf = Crazyflie(rw_cache = "./cache"))
         scf.open_link()
         print(f"[{uri}] -> Connected!")
         check_connection_leds_signal(scf)
-        check_lighthouse_deck(scf)
+        # check_lighthouse_deck(scf)
     except Exception as e:
         print(f"Failed to connect to {uri}!: {e}")
         sys.exit(1)
@@ -94,8 +94,11 @@ if __name__ == "__main__":
     # scf.cf.param.set_value("motorPowerSet.m2", 0)
     # scf.cf.param.set_value("motorPowerSet.m3", 0)
     # scf.cf.param.set_value("motorPowerSet.m4", 0)
+
+    # scf.cf.param.set_value("stabilizer.controller", 6)
+    # scf.cf.param.set_value("stabilizer.estimator", 3)
     scf.cf.param.set_value("stabilizer.controller", 6)
-    scf.cf.param.set_value("stabilizer.estimator", 3)
+
     time.sleep(5)
     print(scf.cf.param.get_value("stabilizer.controller", timeout = 5))
     print(scf.cf.param.get_value("stabilizer.estimator", timeout = 5))
@@ -131,7 +134,7 @@ if __name__ == "__main__":
 
     scf.cf.console.receivedChar.add_callback(lambda text: print(text))
 
-    # log_state.start()
+    log_state.start()
     # log_battery.start()
     # log_motors.start()
 
@@ -163,7 +166,7 @@ if __name__ == "__main__":
 
     # log_motors.stop()
     # log_battery.stop()
-    # log_state.stop()
+    log_state.stop()
 
     scf.close_link()
 

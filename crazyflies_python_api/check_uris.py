@@ -63,8 +63,8 @@ uris = [
     make_uri(0, 80, "2M", "E7E7E7E702"), \
     make_uri(0, 80, "2M", "E7E7E7E703"), \
     make_uri(0, 80, "2M", "E7E7E7E704"), \
-    make_uri(0, 80, "2M", "E7E7E7E705"), \
-    make_uri(0, 80, "2M", "E7E7E7E706"), \
+    # make_uri(0, 80, "2M", "E7E7E7E705"), \
+    # make_uri(0, 80, "2M", "E7E7E7E706"), \
     # make_uri(0, 80, "2M", "E7E7E7E707"), \
     # make_uri(0, 80, "2M", "E7E7E7E708"), \
     # make_uri(0, 80, "2M", "E7E7E7E709"), \
