@@ -2,6 +2,8 @@ import numpy as np
 import logging
 import time
 import sys
+import copy
+
 from cflib.crtp import init_drivers
 from cflib.crazyflie import Crazyflie
 from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
@@ -9,6 +11,12 @@ from cflib.positioning.position_hl_commander import PositionHlCommander
 from cflib.crazyflie.high_level_commander import HighLevelCommander
 from cflib.crazyflie.log import LogConfig
 
+global_x = 0.
+global_y = 0.
+global_z = 0.
+global_roll = 0.
+global_pitch = 0.
+global_yaw = 0.
 
 def make_uri(radio_id, channel, datarate, address_hex):
     return f"radio://{radio_id}/{channel}/{datarate}/{address_hex}"
@@ -23,7 +31,6 @@ def check_connection_leds_signal(scf):
         print(f"Error during connection leds signal!: {e}")
 
 def check_lighthouse_deck(scf):
-    # scf.cf.param.add_update_callback(group = "deck", name = "bcLighthouse4", cb = param_lighthouse_deck)
     lhdeck_value = scf.cf.param.get_value(complete_name = "deck.bcLighthouse4", timeout = 1)
     if int(lhdeck_value):
         print(f"[{uri}] -> Lighthouse deck attached!")
@@ -33,6 +40,8 @@ def check_lighthouse_deck(scf):
 
 def log_state_callback(uri):
     def callback(timestamp, data, logconf):
+        global global_x, global_y, global_z, global_roll, global_pitch, global_yaw
+        global_x, global_y, global_z, global_roll, global_pitch, global_yaw = data['stateEstimate.x'], data['stateEstimate.y'], data['stateEstimate.z'], data['stateEstimate.roll'], data['stateEstimate.pitch'], data['stateEstimate.yaw']
         print(f"[t = {timestamp}]: [{uri}] ->", \
                 f"\n\t-> x = {data['stateEstimate.x']:.3f}, y = {data['stateEstimate.y']:.3f}, z = {data['stateEstimate.z']:.3f}", \
                 f"\n\t-> roll = {data['stateEstimate.roll']:.3f}, pitch = {data['stateEstimate.pitch']:.3f}, yaw = {data['stateEstimate.yaw']:.3f}")
@@ -78,7 +87,7 @@ if __name__ == "__main__":
     init_drivers()
     default_height = 0.5  # default height at takeoff in meters
 
-    uri = make_uri(0, 80, "2M", "E7E7E7E701")
+    uri = make_uri(0, 80, "2M", "E7E7E7E701") # you need to put your drone's URI (change E7E7E7E701)
     try:
         scf = SyncCrazyflie(uri, cf = Crazyflie(rw_cache = "./cache"))
         scf.open_link()
@@ -89,34 +98,17 @@ if __name__ == "__main__":
         print(f"Failed to connect to {uri}!: {e}")
         sys.exit(1)
 
-    # scf.cf.param.set_value("motorPowerSet.enable", 1)
-    # scf.cf.param.set_value("motorPowerSet.m1", 0)
-    # scf.cf.param.set_value("motorPowerSet.m2", 0)
-    # scf.cf.param.set_value("motorPowerSet.m3", 0)
-    # scf.cf.param.set_value("motorPowerSet.m4", 0)
+    # We set the controller to our custom controller!!
+    # 6: our custom controller
+    # 1: Crazyflie's PID controller
     scf.cf.param.set_value("stabilizer.controller", 6)
-    scf.cf.param.set_value("stabilizer.estimator", 3)
-    time.sleep(5)
+    time.sleep(2)
     print(scf.cf.param.get_value("stabilizer.controller", timeout = 5))
-    print(scf.cf.param.get_value("stabilizer.estimator", timeout = 5))
 
     hlc = HighLevelCommander(scf.cf)
-    # with PositionHlCommander(scf, default_height = default_height) as pc:
     time.sleep(1)
 
-    log_battery = LogConfig(name = "Battery", period_in_ms = 1000)
-    log_battery.add_variable("pm.batteryLevel", "uint8_t")
-    scf.cf.log.add_config(log_battery)
-    log_battery.data_received_cb.add_callback(log_battery_callback(uri))
-    
-    log_motors = LogConfig(name = "Motors speed", period_in_ms = 100)
-    log_motors.add_variable("motor.m1", "uint16_t")
-    log_motors.add_variable("motor.m2", "uint16_t")
-    log_motors.add_variable("motor.m3", "uint16_t")
-    log_motors.add_variable("motor.m4", "uint16_t")
-    scf.cf.log.add_config(log_motors)
-    log_motors.data_received_cb.add_callback(log_motors_callback(uri))
-
+    ### Logging variables
     log_state = LogConfig(name = "Current State", period_in_ms = 100)
     log_state.add_variable("stateEstimate.x", "float")
     log_state.add_variable("stateEstimate.y", "float")
@@ -127,14 +119,16 @@ if __name__ == "__main__":
     scf.cf.log.add_config(log_state)
     log_state.data_received_cb.add_callback(log_state_callback(uri))
 
-    # log_state_error = LogConfig(name = "State Error", period_in_ms = 100)
-
     scf.cf.console.receivedChar.add_callback(lambda text: print(text))
 
-    # log_state.start()
-    # log_battery.start()
-    # log_motors.start()
+    log_state.start()
+    ### End of Logging
 
+    # Waiting in order to take a valid x, y, z position
+    time.sleep(2.)
+    x_init, y_init = copy.copy(global_x), copy.copy(global_y)
+
+    # Control!
     takeoff_time = 2.0
     land_time = 3.0
     goto_time = 10.0
@@ -144,11 +138,11 @@ if __name__ == "__main__":
         while True:
             time.sleep(1)
             # xd, yd, zd, yawd, fly_target = create_target_position()
-            xd, yd, zd, yawd, fly_target = 1.0, 1.0, 1.0, 0.0, True
+            ### TO-DO: Once your LQR works okaysih. You can try different targets! Be carefull of the other teams/drones!
+            xd, yd, zd, yawd, fly_target = x_init, y_init, 1.0, 0.0, True # fly one meter above your initial state!
             if fly_target:
                 hlc.go_to(x = xd, y = yd, z = zd, yaw = np.deg2rad(yawd), duration_s = goto_time)
                 time.sleep(goto_time)
-                # pc.go_to(x = xd, y = yd, z = zd, velocity = 0.1)
             else:
                 hlc.land(absolute_height_m = 0.0, duration_s = land_time)
                 time.sleep(land_time)
@@ -159,12 +153,8 @@ if __name__ == "__main__":
             time.sleep(land_time)
         except:
             pass
-        scf.close_link()
 
-    # log_motors.stop()
-    # log_battery.stop()
-    # log_state.stop()
+    hlc.land(absolute_height_m = 0.0, duration_s = land_time)
 
+    log_state.stop()
     scf.close_link()
-
-# check "ctrltarget" log variables
