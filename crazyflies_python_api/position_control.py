@@ -78,7 +78,10 @@ if __name__ == "__main__":
     init_drivers()
     default_height = 0.5  # default height at takeoff in meters
 
-    uri = make_uri(0, 80, "2M", "E7E7E7E704")
+    # set the uri of the crazyflie
+    uri = make_uri(0, 100, "2M", "E7E7E7E710")
+    
+    # establish the connection with the crazyflie
     try:
         scf = SyncCrazyflie(uri, cf = Crazyflie(rw_cache = "./cache"))
         scf.open_link()
@@ -95,16 +98,15 @@ if __name__ == "__main__":
     # scf.cf.param.set_value("motorPowerSet.m3", 0)
     # scf.cf.param.set_value("motorPowerSet.m4", 0)
 
-    # scf.cf.param.set_value("stabilizer.controller", 6)
-    # scf.cf.param.set_value("stabilizer.estimator", 3)
+    # set your preferred controller, for example: 1 for default PID and 6 for your OutOfTree controller
     scf.cf.param.set_value("stabilizer.controller", 6)
+    # scf.cf.param.set_value("stabilizer.estimator", 3)
 
     time.sleep(5)
     print(scf.cf.param.get_value("stabilizer.controller", timeout = 5))
     print(scf.cf.param.get_value("stabilizer.estimator", timeout = 5))
 
     hlc = HighLevelCommander(scf.cf)
-    # with PositionHlCommander(scf, default_height = default_height) as pc:
     time.sleep(1)
 
     log_battery = LogConfig(name = "Battery", period_in_ms = 1000)
@@ -151,7 +153,6 @@ if __name__ == "__main__":
             if fly_target:
                 hlc.go_to(x = xd, y = yd, z = zd, yaw = np.deg2rad(yawd), duration_s = goto_time)
                 time.sleep(goto_time)
-                # pc.go_to(x = xd, y = yd, z = zd, velocity = 0.1)
             else:
                 hlc.land(absolute_height_m = 0.0, duration_s = land_time)
                 time.sleep(land_time)
