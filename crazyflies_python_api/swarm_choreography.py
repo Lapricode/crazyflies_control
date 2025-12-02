@@ -7,11 +7,17 @@ from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
 
 
 uris = [
-    "radio://0/80/2M/E7E7E7E701", \
-    "radio://0/80/2M/E7E7E7E702", \
-    "radio://0/80/2M/E7E7E7E703", \
-    "radio://0/80/2M/E7E7E7E704"
+    # "radio://0/90/2M/E7E7E7E709", \
+    # "radio://0/10/2M/E7E7E7E701", \
+    "radio://0/40/2M/E7E7E7E704", \
+    # "radio://0/80/2M/E7E7E7E708", \
 ]
+
+def init_controller_estimator(scf, controller_num, estimator_num):
+    scf.cf.param.set_value("stabilizer.controller", controller_num)  # set the preferred controller: 1 for default PID and 6 for OutOfTree
+    scf.cf.param.set_value("stabilizer.estimator", estimator_num)  # set the preferred estimator
+    # print(f'[{scf.cf.link_uri}]: Runs on controller {scf.cf.param.get_value("stabilizer.controller", timeout = 5)}!')
+    # print(f'[{scf.cf.link_uri}]: Runs on estimator {scf.cf.param.get_value("stabilizer.estimator", timeout = 5)}!')
 
 def light_check(scf):
     print(f"[{scf.cf.link_uri}]: Checking leds!")
@@ -74,21 +80,23 @@ def hover_sequence(scf, height, flight_time):
 
 def run_circle_sequence(scf, flight_time):
     print(f"[{scf.cf.link_uri}]: Executing circle sequence!")
-    dt = 0.2  # time step in seconds
-    steps = int(flight_time / dt) + 1  # movement steps
-    r = 1.0  # m
-    h = 1.0  # m
-    circle_freq = 1.0 / flight_time  # Hz
-    up_down_dist = 0.3  # m
-    up_down_freq = 2.0 * circle_freq  # Hz
     commander = scf.cf.high_level_commander
+    # trajectory parameters
+    r = 1.25  # m
+    h = 1.2  # m
+    circle_freq = 1.0 / flight_time  # Hz
+    up_down_dist = 0.1  # m
+    up_down_freq = 2.0 * circle_freq  # Hz
+    dt = 0.2  # sec
+    # reach initial position
     cf_num = list(uris).index(scf.cf.link_uri)
     cfs_N = len(uris)
     phi0 = cf_num * (2.0*np.pi / cfs_N)
     reach_init_pos_time = 5.0
     commander.go_to(r * np.cos(phi0), r * np.sin(phi0), h, 0.0, reach_init_pos_time, relative = False)
     time.sleep(reach_init_pos_time)
-    for k in range(steps):
+    # execute the circular trajectory
+    for k in range(int(flight_time / dt) + 1):
         phi_circle = 2.0*np.pi*circle_freq * k*dt + phi0
         phi_up_down = 2.0*np.pi*up_down_freq * k*dt
         if cf_num % 2 == 0:
@@ -102,13 +110,18 @@ if __name__ == "__main__":
     cflib.crtp.init_drivers()
     factory = CachedCfFactory(rw_cache = "./cache")
     cfs_N = len(uris)
+    controller_num, estimator_num = 1, 3
     with Swarm(uris, factory = factory) as swarm:
         print("Connected to the Crazyflies!")
-        swarm.parallel_safe(light_check)
+        # swarm.parallel_safe(light_check)
+        time.sleep(2.0)
+        swarm.sequential(lambda scf: init_controller_estimator(scf, controller_num, estimator_num))
+        time.sleep(2.0)
         swarm.reset_estimators()
+        time.sleep(1.0)
         swarm.sequential(lambda scf: hover_sequence(scf, 0.5, 2.0))
         time.sleep(2.0)
-        swarm.parallel_safe(lambda scf: take_off(scf, 0.5, 5.0))
+        swarm.parallel_safe(lambda scf: take_off(scf, 1.0, 5.0))
         time.sleep(5.0)
         swarm.parallel_safe(lambda scf: run_circle_sequence(scf, 20.0))
         time.sleep(5.0)

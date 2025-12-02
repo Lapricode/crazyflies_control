@@ -59,25 +59,16 @@ def detect_crazyflies_uris(tested_uris):
 
 
 uris = [
-    make_uri(0, 80, "2M", "E7E7E7E701"), \
-    make_uri(0, 80, "2M", "E7E7E7E702"), \
-    make_uri(0, 80, "2M", "E7E7E7E703"), \
-    make_uri(0, 80, "2M", "E7E7E7E704"), \
-    # make_uri(0, 80, "2M", "E7E7E7E705"), \
-    # make_uri(0, 80, "2M", "E7E7E7E706"), \
-    # make_uri(0, 80, "2M", "E7E7E7E707"), \
-    # make_uri(0, 80, "2M", "E7E7E7E708"), \
-    # make_uri(0, 80, "2M", "E7E7E7E709"), \
-    # make_uri(0, 80, "2M", "E7E7E7E710"), \
-    # make_uri(0, 80, "2M", "E7E7E7E711"), \
-    # make_uri(0, 80, "2M", "E7E7E7E712"), \
-    # make_uri(0, 80, "2M", "E7E7E7E713"), \
-    # make_uri(0, 80, "2M", "E7E7E7E714"), \
-    # make_uri(0, 80, "2M", "E7E7E7E715"), \
-    # make_uri(0, 80, "2M", "E7E7E7E716"), \
-    # make_uri(0, 80, "2M", "E7E7E7E717"), \
-    # make_uri(0, 80, "2M", "E7E7E7E718"), \
-    # make_uri(0, 80, "2M", "E7E7E7E719"), \
-    # make_uri(0, 80, "2M", "E7E7E7E720"), \
+    make_uri(0, 10, "2M", "E7E7E7E701"), \
+    make_uri(0, 40, "2M", "E7E7E7E704"), \
+    make_uri(0, 80, "2M", "E7E7E7E708"), \
+    make_uri(0, 90, "2M", "E7E7E7E709"), \
 ]
+# uris = []
+# for offset in range(0, 20):
+#     address = f"E7E7E7E7{offset:02d}"
+#     # uris.append(make_uri(0, 80, "2M", address))
+#     for channel in range(0, 126, 5):
+#         uris.append(make_uri(0, channel, "2M", address))
+
 detect_crazyflies_uris(uris)
