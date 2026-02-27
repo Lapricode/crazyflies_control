@@ -7,10 +7,10 @@ from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
 
 
 uris = [
-    # "radio://0/90/2M/E7E7E7E709", \
-    # "radio://0/10/2M/E7E7E7E701", \
+    "radio://0/10/2M/E7E7E7E701", \
     "radio://0/40/2M/E7E7E7E704", \
-    # "radio://0/80/2M/E7E7E7E708", \
+    "radio://0/80/2M/E7E7E7E708", \
+    "radio://0/90/2M/E7E7E7E709", \
 ]
 
 def init_controller_estimator(scf, controller_num, estimator_num):
@@ -119,12 +119,13 @@ if __name__ == "__main__":
         time.sleep(2.0)
         swarm.reset_estimators()
         time.sleep(1.0)
-        swarm.sequential(lambda scf: hover_sequence(scf, 0.5, 2.0))
-        time.sleep(2.0)
-        swarm.parallel_safe(lambda scf: take_off(scf, 1.0, 5.0))
-        time.sleep(5.0)
-        swarm.parallel_safe(lambda scf: run_circle_sequence(scf, 20.0))
-        time.sleep(5.0)
-        # swarm.parallel_safe(run_square_sequence)
-        # swarm.parallel_safe(run_sequence, args_dict = seq_args)
-        swarm.parallel_safe(lambda scf: land(scf, 0.0, 5.0))
+        for i in range(5):
+            swarm.sequential(lambda scf: hover_sequence(scf, 0.5, 2.0))
+            time.sleep(2.0)
+            swarm.parallel_safe(lambda scf: take_off(scf, 1.0, 5.0))
+            time.sleep(5.0)
+            swarm.parallel_safe(lambda scf: run_circle_sequence(scf, 20.0))
+            time.sleep(5.0)
+            # swarm.parallel_safe(run_square_sequence)
+            # swarm.parallel_safe(run_sequence, args_dict = seq_args)
+            swarm.parallel_safe(lambda scf: land(scf, 0.0, 5.0))
