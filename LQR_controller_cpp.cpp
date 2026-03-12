@@ -60,7 +60,7 @@ typedef union vec_3_u
   };
 } vec_3_t; // 3x1 column vector
 
-typedef struct vec_4_u
+typedef union vec_4_u
 {
   float v[4];
   struct
