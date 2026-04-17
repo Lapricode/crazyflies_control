@@ -1,0 +1,7 @@
+- Show Battery Level
+- Move crazyflie stuff in a seperate python file, in order to keep the visualization and drone stuff apart.
+- Info menu about the various bindings, that should appear in the right side of the window. In the left side of the window should be written "Press [i] for more info".
+- Add KEYDOWN events for:
+    - show/hide world frame
+    - show/hide quadrotor
+    - show/hide lighthouse stations
