@@ -55,3 +55,5 @@ TODOs
     - Estimator: the user types the estimator number
 
 - Add alt + numkey binding (numkey 1-8) for tracking a specific drone (it should go together with the shift bindings, in the info panel). This means that the camera lookat point should be following the origin of the specified crazyflie. Also, add alt + 0 binding for resetting to manual mode, where the camera lookat point is contrlled by panning with the mouse, as before.
+
+- Add shift + c binding for showing the console/terminal prints. It should open/close a window in the bottom middle of the pygame window. The console window should not cover (in other words it should not be above) the hud or the flight controller, it should be the proper length to appear separated.

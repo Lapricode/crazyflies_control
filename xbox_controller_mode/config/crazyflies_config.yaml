@@ -1,0 +1,7 @@
+configs:
+    "1":
+        drones:
+            1: radio://0/80/2M/E7E7E7E701
+            2: radio://0/80/2M/E7E7E7E702
+            3: radio://0/80/2M/E7E7E7E703
+            4: radio://0/80/2M/E7E7E7E704

@@ -1,38 +1,27 @@
 #!/usr/bin/env python3
 """
-Crazyflie 3D State Visualizer - Visualization Module
-pygame + PyOpenGL - hardware-accelerated interactive 3D
+Crazyflie 3D State Visualizer — Visualization Module
+
+An interactive, hardware-accelerated 3D visualization tool for Crazyflie drones,
+built using pygame and PyOpenGL. It provides real-time rendering of drone states,
+camera controls, and configurable scene elements.
 
 Controls:
-    LMB drag     : rotate view
-    RMB drag     : pan / translate camera target
-    Scroll       : zoom in / out
-    Middle-click : reset view
-    F11          : toggle fullscreen
-    PgUp / PgDn  : scroll HUD up / down
-    I            : toggle key bindings menu
-    Escape       : quit
-    Shift + W    : show/hide world frame
-    Shift + D    : show/hide quadrotor body
-    Shift + F    : show/hide quadrotor frame
-    Shift + L    : show/hide lighthouse stations
-    Shift + H    : show/hide HUD text
-    Shift + T    : show/hide scene labels
-    Shift + 0    : show/hide all drones
-    Shift + 1-8  : show/hide drone N
-    Ctrl  + A    : add drone
-    Ctrl  + D    : delete drone
-    Ctrl  + R    : connect drone(s)
-    Ctrl  + 1-8  : blink LED of drone N (3 blinks, 1 per second)
-    Ctrl  + C    : flight controller panel
+    All controls for mouse, general, scene, drones, camera, control, etc., are accessible in-app via the Key Bindings menu (press "I").
 
 Usage:
-    python visualization.py                    # start with no drones (use Ctrl+A to add)
-    python visualization.py --yaml my_lh.yaml  # custom lighthouse file
+    Run without drones (add manually in-app):
+        python visualization.py
+
+    Run with a custom lighthouse configuration:
+        python visualization.py --yaml my_lh.yaml
 
 Dependencies:
-    pip3 install pygame PyOpenGL PyOpenGL_accelerate numpy pyyaml
-    pip3 install cflib   # optional - only needed when connecting to real drones
+    Required:
+        pip3 install pygame PyOpenGL PyOpenGL_accelerate numpy pyyaml
+
+    Optional (for real drone connectivity):
+        pip3 install cflib
 """
 
 
@@ -48,7 +37,7 @@ from pygame.locals import (
     K_F11, K_PAGEUP, K_PAGEDOWN, K_TAB, K_RETURN,
     K_UP, K_DOWN, K_LEFT, K_RIGHT,
     MOUSEBUTTONDOWN, MOUSEBUTTONUP, MOUSEMOTION,
-    KMOD_SHIFT, KMOD_CTRL,
+    KMOD_SHIFT, KMOD_CTRL, KMOD_ALT,
 )
 from OpenGL.GL import *
 from OpenGL.GLU import *
@@ -74,6 +63,7 @@ DRONE_BODY_YAW = -3/4 * math.pi  # assuming body_yaw0 = 0 is motor 1 at +y, moto
 
 # Files
 LIGHTHOUSE_YAML = "config/lighthouse_config.yaml"  # configuration file for the lighthouse stations
+DRONES_YAML     = "config/crazyflies_config.yaml"  # configuration file for drone fleet presets
 
 # Key bindings info menu (hud_font, right side of screen)
 INFO_MENU_LINES = [
@@ -96,10 +86,15 @@ INFO_MENU_LINES = [
     ("  Shift + T      : scene labels on/off",     (0.45, 0.10, 0.10)),
     ("  Shift + 0      : show/hide all drones",    (0.45, 0.10, 0.10)),
     ("  Shift + 1-8    : show/hide drone N",       (0.45, 0.10, 0.10)),
+    ("  Alt   + 0      : reset camera tracking",   (0.45, 0.10, 0.45)),
+    ("  Alt   + 1-8    : track drone N",           (0.45, 0.10, 0.45)),
     ("",                                           (0.00, 0.00, 0.00)),
     ("  Ctrl  + A      : add drone",               (0.10, 0.10, 0.45)),
     ("  Ctrl  + D      : delete drone",            (0.10, 0.10, 0.45)),
     ("  Ctrl  + R      : connect drone(s)",        (0.10, 0.10, 0.45)),
+    ("  Ctrl  + S      : save drone config",       (0.10, 0.10, 0.45)),
+    ("  Ctrl  + L      : load drone config",       (0.10, 0.10, 0.45)),
+    ("  Ctrl  + P      : change drone params",     (0.10, 0.10, 0.45)),
     ("  Ctrl  + 1-8    : blink LED of drone N",    (0.10, 0.10, 0.45)),
     ("",                                           (0.00, 0.00, 0.00)),
     ("  Ctrl  + C      : flight controller panel", (0.10, 0.45, 0.10)),
@@ -703,7 +698,7 @@ def draw_hud_scrollable(lines, font, win_w, win_h, scroll_offset):
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
 
     _begin_2d(win_w, win_h)
-    _draw_filled_rect(PAD - 4, PAD - 4, sw + 8, sh + 8, 0.9, 0.9, 0.9, 0.7)
+    _draw_filled_rect(PAD - 4, PAD - 4, sw + 8, sh + 8, 0.9, 0.9, 0.9, 0.8)
     _draw_quad_tex(tex, PAD, PAD, sw, sh)
     glDeleteTextures(1, [tex])
     _end_2d()
@@ -729,7 +724,7 @@ def draw_info_menu(lines, font, win_w, win_h):
     _begin_2d(win_w, win_h)
 
     # semi-transparent background panel
-    _draw_filled_rect(x - 4, y - 4, panel_w + 8, panel_h + 8, 0.9, 0.9, 0.9, 0.7)
+    _draw_filled_rect(x - 4, y - 4, panel_w + 8, panel_h + 8, 0.9, 0.9, 0.9, 0.8)
 
     # text lines
     for i, (surf, (_, col)) in enumerate(zip(surfaces, lines)):
@@ -823,6 +818,76 @@ def _default_pos(drone_num):
     return (sx * r, sy * r, 0.)
 
 
+def _save_drones_config(drones):
+    """
+    Save the current drone fleet to config/crazyflies_config.yaml as a numbered entry.
+    The file contains numbered configurations (1, 2, 3, ...). Each save appends
+    a new numbered entry with the current fleet's URIs.
+    """
+    import os
+    os.makedirs("config", exist_ok=True)
+
+    # read existing configs
+    configs = {}
+    if os.path.exists(DRONES_YAML):
+        with open(DRONES_YAML) as f:
+            data = yaml.safe_load(f) or {}
+            if isinstance(data, dict) and "configs" in data:
+                configs = data["configs"]
+
+    # find next config number
+    next_num = max(map(int, configs.keys()), default=0) + 1 if configs else 1
+
+    # build new config entry
+    uris = {num: entry.uri for num, entry in sorted(drones.items())}
+    configs[str(next_num)] = {"drones": uris}
+
+    # write back
+    with open(DRONES_YAML, "w") as f:
+        yaml.dump({"configs": configs}, f, default_flow_style=False, sort_keys=False)
+
+    print(f"[CONFIG] Saved {len(uris)} drone(s) as config #{next_num} to {DRONES_YAML}")
+
+
+def _load_drones_config(config_num, drones):
+    """
+    Load a numbered drone configuration from config/crazyflies_config.yaml.
+    Clears the current fleet and spawns drones with URIs from the specified config.
+    """
+    import os
+    if not os.path.exists(DRONES_YAML):
+        print(f"[WARN] Config file not found: {DRONES_YAML}")
+        return
+
+    with open(DRONES_YAML) as f:
+        data = yaml.safe_load(f) or {}
+
+    configs = data.get("configs", {})
+    cfg = configs.get(str(config_num))
+    if cfg is None:
+        print(f"[WARN] Config #{config_num} not found in {DRONES_YAML}")
+        return
+
+    drone_uris = cfg.get("drones", {})
+    if not drone_uris:
+        print(f"[WARN] Config #{config_num} has no drones.")
+        return
+
+    # clear current fleet
+    for entry in list(drones.values()):
+        entry.stop_connection()
+    drones.clear()
+
+    # add drones from config
+    for num_str, uri in drone_uris.items():
+        num = int(num_str)
+        pos = _default_pos(num)
+        drones[num] = DroneEntry(num, uri, pos)
+        print(f"[CONFIG] Loaded CF {num} → {uri}")
+
+    print(f"[CONFIG] Loaded config #{config_num} with {len(drone_uris)} drone(s).")
+
+
 def _build_uri(radio_id, channel, datarate, address):
     return f"radio://{radio_id}/{channel}/{datarate}/{address}"
 
@@ -856,6 +921,30 @@ def _make_connect_modal(drone_nums):
         fields = [
             TextField("Drone number  (0 = all)", "0", TextField.DIGITS,
                       f"available: {nums_str}"),
+        ],
+    )
+
+
+def _make_load_modal():
+    """Modal to ask which config number to load from crazyflies_config.yaml."""
+    return ModalDialog(
+        title  = "Load Drone Config",
+        fields = [
+            TextField("Config number", "1", TextField.DIGITS, "1-indexed"),
+        ],
+    )
+
+
+def _make_param_modal(drone_nums):
+    """Modal to change parameters for a specific drone."""
+    nums_str = ", ".join(str(n) for n in sorted(drone_nums)) or "none"
+    return ModalDialog(
+        title  = "Change Drone Parameters",
+        fields = [
+            TextField("Drone number", "", TextField.DIGITS, f"available: {nums_str}"),
+            TextField("LED value (0-255)", "", TextField.DIGITS, "led.bitmask"),
+            TextField("Controller", "", TextField.DIGITS, "stabilizer.controller"),
+            TextField("Estimator", "", TextField.DIGITS, "stabilizer.estimator"),
         ],
     )
 
@@ -903,6 +992,74 @@ def _handle_modal_confirm(modal, drones):
         else:
             print(f"[WARN] Drone {n} not found in fleet.")
 
+    elif modal.title == "Load Drone Config":
+        raw = modal.fields[0].value.strip()
+        if not raw.isdigit():
+            print("[WARN] Invalid config number.")
+            return
+        config_num = int(raw)
+        _load_drones_config(config_num, drones)
+
+    elif modal.title == "Change Drone Parameters":
+        drone_num_str = modal.fields[0].value.strip()
+        led_str       = modal.fields[1].value.strip()
+        ctrl_str      = modal.fields[2].value.strip()
+        est_str       = modal.fields[3].value.strip()
+
+        if not drone_num_str.isdigit():
+            print("[WARN] Invalid drone number for parameter change.")
+            return
+        n = int(drone_num_str)
+        if n not in drones:
+            print(f"[WARN] Drone {n} not found in fleet.")
+            return
+
+        entry = drones[n]
+        if not entry.state.connected or entry.thread is None:
+            print(f"[WARN] CF {n} not connected - cannot change parameters.")
+            return
+
+        cf = entry.thread._cf
+        if cf is None:
+            print(f"[WARN] CF {n} connection handle unavailable.")
+            return
+
+        # LED value
+        if led_str:
+            try:
+                led_val = int(led_str)
+                if 0 <= led_val <= 255:
+                    cf.param.set_value("led.bitmask", str(led_val))
+                    print(f"[PARAM] CF {n}: led.bitmask = {led_val}")
+                else:
+                    print(f"[WARN] LED value must be 0-255.")
+            except ValueError:
+                print(f"[WARN] Invalid LED value: {led_str}")
+
+        # Controller
+        if ctrl_str:
+            try:
+                ctrl_val = int(ctrl_str)
+                cf.param.set_value("stabilizer.controller", str(ctrl_val))
+                # update local state
+                est_id, _ = entry.state.get_control_config()
+                entry.state.set_control_config(est_id, ctrl_val)
+                print(f"[PARAM] CF {n}: stabilizer.controller = {ctrl_val}")
+            except ValueError:
+                print(f"[WARN] Invalid controller value: {ctrl_str}")
+
+        # Estimator
+        if est_str:
+            try:
+                est_val = int(est_str)
+                cf.param.set_value("stabilizer.estimator", str(est_val))
+                # update local state
+                _, ctrl_id = entry.state.get_control_config()
+                entry.state.set_control_config(est_val, ctrl_id)
+                print(f"[PARAM] CF {n}: stabilizer.estimator = {est_val}")
+            except ValueError:
+                print(f"[WARN] Invalid estimator value: {est_str}")
+
 
 def draw_controller_panel(ctrl_strs, ctrl_focused, font, win_w, win_h, cursor_on):
     """
@@ -918,7 +1075,7 @@ def draw_controller_panel(ctrl_strs, ctrl_focused, font, win_w, win_h, cursor_on
     PAD    = 10
     LINE_H = font.get_height() + 6
 
-    LABELS   = ["Drone (0=all)     ", "linear step (m)   ", "angular step (deg)"]
+    LABELS   = ["Drone (0=all)     ", "Linear step (m)   ", "Angular step (deg)"]
     FIELD_W  = 90
 
     ROWS = [
@@ -1092,6 +1249,9 @@ def _build_hud_lines(drones, lighthouses, camera, show_info_menu, show_ctrl_pane
     lines.append((None, None))
     lines.append((f"LightHouse Stations : {len(lighthouses)}",
                   (0.70, 0.10, 0.70)))
+    for lh_name, origin, _ in lighthouses:
+        lines.append((f"  LH {lh_name} : ({origin[0]:.3f}, {origin[1]:.3f}, {origin[2]:.3f})",
+                      (0.60, 0.10, 0.60)))
 
     lines.append((None, None))
     lines.append((ctrl_hint, (0.10, 0.50, 0.10)))
@@ -1226,6 +1386,9 @@ def main():
     ctrl_focused    = 0                          # 0 = drone, 1 = dx, 2 = dq
     ctrl_strs       = ["0", "0.50", "15.0"]     # editable field values
 
+    # camera tracking state (None = manual, int = track drone N)
+    camera_track_num = None
+
     # Xbox controller (connects automatically if a joystick is detected)
     xbox = XboxController(drones)
     xbox.start()
@@ -1317,9 +1480,12 @@ def main():
                     elif n in drones:
                         drones[n].visible = not drones[n].visible
 
-                # Ctrl + A : add drone
+                # Ctrl + A : add drone (limit 8)
                 elif evt.key == K_a and (mods & KMOD_CTRL):
-                    modal = _make_add_modal()
+                    if len(drones) >= 8:
+                        print("[INFO] Maximum of 8 drones reached. Delete a drone to add another.")
+                    else:
+                        modal = _make_add_modal()
 
                 # Ctrl + D : delete drone
                 elif evt.key == K_d and (mods & KMOD_CTRL):
@@ -1335,17 +1501,49 @@ def main():
                     else:
                         print("[INFO] No drones in fleet. Use Ctrl+A to add one first.")
 
+                # Ctrl + S : save drone config
+                elif evt.key == K_s and (mods & KMOD_CTRL):
+                    if drones:
+                        _save_drones_config(drones)
+                    else:
+                        print("[INFO] No drones to save.")
+
+                # Ctrl + L : load drone config
+                elif evt.key == K_l and (mods & KMOD_CTRL):
+                    modal = _make_load_modal()
+
+                # Ctrl + P : change drone parameters
+                elif evt.key == pygame.K_p and (mods & KMOD_CTRL):
+                    if drones:
+                        modal = _make_param_modal(set(drones.keys()))
+                    else:
+                        print("[INFO] No drones in fleet.")
+
                 # Ctrl + C : toggle flight controller panel
                 elif evt.key == K_c and (mods & KMOD_CTRL):
                     show_ctrl_panel = not show_ctrl_panel
 
                 # Ctrl + numkey (1-8) : blink LED of drone N
-                elif (mods & KMOD_CTRL) and pygame.K_1 <= evt.key <= pygame.K_9:
+                elif (mods & KMOD_CTRL) and pygame.K_1 <= evt.key <= pygame.K_8:
                     n = evt.key - pygame.K_0
                     if n in drones and drones[n].thread is not None:
                         drones[n].thread.blink_led()
                     else:
                         print(f"[INFO] CF {n} not connected - cannot blink LED.")
+
+                # Alt + 0 : reset camera tracking
+                elif evt.key == pygame.K_0 and (mods & KMOD_ALT):
+                    camera_track_num = None
+                    print("[INFO] Camera tracking disabled.")
+
+                # Alt + numkey (1-8) : track drone N
+                elif (mods & KMOD_ALT) and pygame.K_1 <= evt.key <= pygame.K_8:
+                    n = evt.key - pygame.K_0
+                    if n in drones:
+                        camera_track_num = n
+                        print(f"[INFO] Camera tracking CF {n}.")
+                    else:
+                        print(f"[INFO] CF {n} not in fleet.")
 
                 # flight action keys (active when controller panel is open)
                 elif show_ctrl_panel and not (mods & (KMOD_SHIFT | KMOD_CTRL)):
@@ -1402,8 +1600,13 @@ def main():
         # headlight: set before camera so it stays fixed relative to viewer
         glLightfv(GL_LIGHT0, GL_POSITION, [0., 0., 5., 0.])
 
-        camera.apply()
+        # update camera tracking
+        if camera_track_num is not None and camera_track_num in drones:
+            pwb, _, _, _, _, _, _ = drones[camera_track_num].state.get()
+            camera.lookat = pwb.copy()
 
+        camera.apply()
+            
         # collect scene labels to project after the 3-D pass
         scene_labels = []
 
