@@ -100,7 +100,7 @@ INFO_MENU_LINES = [
     ("  Ctrl  + 1-8    : blink LED of drone N",    (0.10, 0.10, 0.45)),
     ("",                                           (0.00, 0.00, 0.00)),
     ("  Ctrl  + C      : flight controller panel", (0.10, 0.45, 0.10)),
-    ("    F            : liftoff",                 (0.10, 0.45, 0.10)),
+    ("    F            : takeoff",                 (0.10, 0.45, 0.10)),
     ("    L            : land",                    (0.10, 0.45, 0.10)),
     ("    W            : up",                      (0.10, 0.45, 0.10)),
     ("    S            : down",                    (0.10, 0.45, 0.10)),
@@ -1081,18 +1081,18 @@ def draw_controller_panel(ctrl_strs, ctrl_focused, font, win_w, win_h, cursor_on
     FIELD_W  = 90
 
     ROWS = [
-        ("FLIGHT CONTROLLER  [Ctrl+C]", None),
-        ("─" * 34,                      None),
+        ("FLIGHT CONTROLLER  [Ctrl+C]",      None),
+        ("─" * 34,                           None),
         None,   # Drone field
         None,   # dx field
         None,   # dq field
-        ("─" * 34,                      None),
-        ("[F] Liftoff      [L] Land",    (0.10, 0.50, 0.10)),
-        ("[W] Up ↑         [S] Down ↓",  (0.10, 0.50, 0.10)),
-        ("[A] Yaw ←        [D] Yaw →",   (0.10, 0.50, 0.10)),
-        ("[↑] Forward      [↓] Back",    (0.10, 0.50, 0.10)),
-        ("[←] Slide L      [→] Slide R", (0.10, 0.50, 0.10)),
-        ("Tab: cycle fields",            (0.40, 0.40, 0.40)),
+        ("─" * 34,                           None),
+        ("[F] Takeoff      [L] Land",        (0.10, 0.50, 0.10)),
+        ("[W] Up           [S] Down",        (0.10, 0.50, 0.10)),
+        ("[A] Yaw CCW      [D] Yaw CW",      (0.10, 0.50, 0.10)),
+        ("[↑] Forward      [↓] Backward",    (0.10, 0.50, 0.10)),
+        ("[←] Slide Left   [→] Slide Right", (0.10, 0.50, 0.10)),
+        ("Tab: cycle fields",                (0.40, 0.40, 0.40)),
     ]
 
     # measure panel width
@@ -1445,8 +1445,9 @@ def main():
     pygame.display.set_mode((WINDOW_W, WINDOW_H), DOUBLEBUF | OPENGL | RESIZABLE)
     pygame.display.set_caption("Crazyflie 3D Visualizer")
 
+    # fonts
     hud_font     = pygame.font.SysFont(name = "consolas", size = 13, bold = True)
-    console_font = pygame.font.SysFont(name = "consolas", size = 10, bold = True)
+    console_font = pygame.font.SysFont(name = "consolas", size = 11, bold = True)
     control_font = pygame.font.SysFont(name = "lucidaconsole", size = 13, bold = True)
     info_font    = pygame.font.SysFont(name = "couriernew", size = 11, bold = True)
     scene_font   = pygame.font.SysFont(name = "arial", size = 14, bold = True, italic = True)
