@@ -42,6 +42,7 @@ from pygame.locals import (
 from OpenGL.GL import *
 from OpenGL.GLU import *
 import yaml
+from collections import deque
 
 from crazyflie import DroneState, CrazyflieThread, MAX_PWM
 from xbox_controller import XboxController
@@ -83,6 +84,7 @@ INFO_MENU_LINES = [
     ("  Shift + F      : drone frame on/off",      (0.45, 0.10, 0.10)),
     ("  Shift + L      : lighthouses on/off",      (0.45, 0.10, 0.10)),
     ("  Shift + H      : HUD text on/off",         (0.45, 0.10, 0.10)),
+    ("  Shift + C      : console prints on/off",   (0.45, 0.10, 0.10)),
     ("  Shift + T      : scene labels on/off",     (0.45, 0.10, 0.10)),
     ("  Shift + 0      : show/hide all drones",    (0.45, 0.10, 0.10)),
     ("  Shift + 1-8    : show/hide drone N",       (0.45, 0.10, 0.10)),
@@ -1224,6 +1226,115 @@ _CTRL_ALLOWED = [
 ]
 
 
+class StreamTee:
+    """
+    Mirrors stdout/stderr to the real terminal and also stores each printed line
+    in a deque for the in-app console panel.
+    """
+    def __init__(self, stream, line_buffer):
+        self._stream = stream
+        self._buffer = line_buffer
+        self._partial = ""
+
+    def write(self, text):
+        self._stream.write(text)
+
+        # Preserve partial lines between writes.
+        text = text.replace("\r", "\n")
+        parts = (self._partial + text).split("\n")
+        self._partial = parts.pop()
+        for line in parts:
+            self._buffer.append(line)
+
+    def flush(self):
+        self._stream.flush()
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+def _wrap_console_line(text, font, max_width):
+    """Word-wrap one console line to fit the panel width."""
+    if not text:
+        return [""]
+    words = text.expandtabs(4).split(" ")
+    lines = []
+    cur = ""
+
+    for word in words:
+        candidate = word if not cur else cur + " " + word
+        if font.size(candidate)[0] <= max_width:
+            cur = candidate
+        else:
+            if cur:
+                lines.append(cur)
+            cur = word
+
+            # Hard-break a single long token if needed
+            while font.size(cur)[0] > max_width and len(cur) > 1:
+                for i in range(1, len(cur) + 1):
+                    if font.size(cur[:i])[0] > max_width:
+                        lines.append(cur[:i - 1])
+                        cur = cur[i - 1:]
+                        break
+
+    if cur:
+        lines.append(cur)
+    return lines or [""]
+
+
+def draw_console_panel(console_lines, font, win_w, win_h, cursor_on):
+    """
+    Render a bottom-middle console panel showing captured stdout/stderr lines.
+    """
+    PAD = 10
+    LINE_H = font.get_height() + 5
+    BOTTOM_RESERVED = 10
+
+    # Keep it centered and modest in width so it stays visually separate.
+    PANEL_W = max(400, min(int(win_w * 0.40), 700))
+    inner_w = PANEL_W - 2 * PAD
+
+    # Wrap and keep only the newest visible lines.
+    wrapped = []
+    for raw in list(console_lines)[-250:]:
+        wrapped.extend(_wrap_console_line(raw, font, inner_w))
+
+    # Keep only the newest rows that can actually be shown
+    max_rows = max(5, min(10, int(win_h * 0.30) // LINE_H))
+    MAX_BUFFER = max_rows
+    if len(console_lines) > MAX_BUFFER:
+        console_lines.popleft()
+    rows = console_lines if console_lines else ["[no console output yet]"]
+
+    PANEL_H = LINE_H * (len(rows) + 1) + 2 * PAD
+    x = (win_w - PANEL_W) // 2
+    y = win_h - PANEL_H - BOTTOM_RESERVED
+
+    surf = pygame.Surface((PANEL_W, PANEL_H), pygame.SRCALPHA)
+    surf.fill((20, 20, 20, 210))
+    pygame.draw.rect(surf, (170, 170, 170), (0, 0, PANEL_W, PANEL_H), 2)
+
+    surf.blit(font.render("CONSOLE  [Shift+C]", True, (235, 235, 235)), (PAD, PAD))
+    yy = PAD + LINE_H
+    for line in rows:
+        surf.blit(font.render(line, True, (230, 230, 230)), (PAD, yy))
+        yy += LINE_H
+
+    sw, sh = surf.get_size()
+    raw = pygame.image.tostring(surf, "RGBA", True)
+    tex = glGenTextures(1)
+    glBindTexture(GL_TEXTURE_2D, tex)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, sw, sh, 0, GL_RGBA, GL_UNSIGNED_BYTE, raw)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+
+    _begin_2d(win_w, win_h)
+    _draw_quad_tex(tex, x, y, sw, sh)
+    glDeleteTextures(1, [tex])
+    _end_2d()
+
+
 def _build_hud_lines(drones, lighthouses, camera, show_info_menu, show_ctrl_panel, xbox):
     """
     Build the complete scrollable HUD line list.
@@ -1335,10 +1446,16 @@ def main():
     pygame.display.set_caption("Crazyflie 3D Visualizer")
 
     hud_font     = pygame.font.SysFont(name = "consolas", size = 13, bold = True)
+    console_font = pygame.font.SysFont(name = "consolas", size = 10, bold = True)
     control_font = pygame.font.SysFont(name = "lucidaconsole", size = 13, bold = True)
     info_font    = pygame.font.SysFont(name = "couriernew", size = 11, bold = True)
     scene_font   = pygame.font.SysFont(name = "arial", size = 14, bold = True, italic = True)
     modal_font   = pygame.font.SysFont(name = "consolas", size = 14, bold = True)
+
+    # in-app console buffer (captures stdout/stderr and keeps the terminal too)
+    console_lines = deque(maxlen = 100)
+    sys.stdout = StreamTee(sys.stdout, console_lines)
+    sys.stderr = StreamTee(sys.stderr, console_lines)
 
     # depth & blending
     glEnable(GL_DEPTH_TEST)
@@ -1372,6 +1489,7 @@ def main():
     show_lighthouses = True
     show_hud_text    = True
     show_scene_text  = True
+    show_console     = False
     show_info_menu   = False
 
     # HUD scroll state
@@ -1466,6 +1584,8 @@ def main():
                     show_lighthouses = not show_lighthouses
                 elif evt.key == K_h and (mods & KMOD_SHIFT):
                     show_hud_text = not show_hud_text
+                elif evt.key == K_c and (mods & KMOD_SHIFT) and not (mods & KMOD_CTRL):
+                    show_console = not show_console
                 elif evt.key == K_t and (mods & KMOD_SHIFT):
                     show_scene_text = not show_scene_text
 
@@ -1655,6 +1775,10 @@ def main():
         if show_info_menu:
             draw_info_menu(INFO_MENU_LINES, info_font, WINDOW_W, WINDOW_H)
 
+        # console overlay (bottom-middle)
+        if show_console:
+            draw_console_panel(console_lines, console_font, WINDOW_W, WINDOW_H, cursor_on)
+            
         # flight controller panel (bottom-right corner)
         if show_ctrl_panel:
             draw_controller_panel(ctrl_strs, ctrl_focused, control_font, WINDOW_W, WINDOW_H, cursor_on)
