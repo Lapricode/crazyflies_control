@@ -10,6 +10,8 @@ Controls:
     Middle-click : reset view
     F11          : toggle fullscreen
     PgUp / PgDn  : scroll HUD up / down
+    I            : toggle key bindings menu
+    Escape       : quit
     Shift + W    : show/hide world frame
     Shift + D    : show/hide quadrotor body
     Shift + F    : show/hide quadrotor frame
@@ -17,13 +19,12 @@ Controls:
     Shift + H    : show/hide HUD text
     Shift + T    : show/hide scene labels
     Shift + 0    : show/hide all drones
-    Shift + 1-9  : show/hide drone N
+    Shift + 1-8  : show/hide drone N
     Ctrl  + A    : add drone
     Ctrl  + D    : delete drone
     Ctrl  + R    : connect drone(s)
-    Ctrl  + 1-9  : blink LED of drone N (3 blinks, 1 per second)
-    I            : toggle key bindings menu
-    Escape       : quit
+    Ctrl  + 1-8  : blink LED of drone N (3 blinks, 1 per second)
+    Ctrl  + C    : flight controller panel
 
 Usage:
     python visualization.py                    # start with no drones (use Ctrl+A to add)
@@ -43,8 +44,9 @@ import numpy as np
 import pygame
 from pygame.locals import (
     DOUBLEBUF, OPENGL, QUIT, KEYDOWN, RESIZABLE, VIDEORESIZE,
-    K_ESCAPE, K_i, K_w, K_d, K_f, K_l, K_h, K_t, K_r, K_a,
+    K_ESCAPE, K_i, K_w, K_s, K_d, K_f, K_l, K_h, K_t, K_r, K_a, K_c,
     K_F11, K_PAGEUP, K_PAGEDOWN, K_TAB, K_RETURN,
+    K_UP, K_DOWN, K_LEFT, K_RIGHT,
     MOUSEBUTTONDOWN, MOUSEBUTTONUP, MOUSEMOTION,
     KMOD_SHIFT, KMOD_CTRL,
 )
@@ -53,6 +55,7 @@ from OpenGL.GLU import *
 import yaml
 
 from crazyflie import DroneState, CrazyflieThread, MAX_PWM
+from xbox_controller import XboxController
 
 
 # ==============================================================================
@@ -70,47 +73,43 @@ DRONE_ARM_L    = 0.046            # distance from body centre to each motor (Cra
 DRONE_BODY_YAW = -3/4 * math.pi  # assuming body_yaw0 = 0 is motor 1 at +y, motor 2 at +x, clockwise
 
 # Files
-LIGHTHOUSE_YAML = "lighthouse_config.yaml"  # configuration file for the lighthouse stations
-
-# Default spawn positions for drones 1, 2, 3, ... (world XY plane, z = 0)
-DEFAULT_POSITIONS = [
-    (-1.,  1., 0.),
-    ( 1.,  1., 0.),
-    ( 1., -1., 0.),
-    (-1., -1., 0.),
-    (-2.,  2., 0.),
-    ( 2.,  2., 0.),
-    ( 2., -2., 0.),
-    (-2., -2., 0.),
-]
+LIGHTHOUSE_YAML = "config/lighthouse_config.yaml"  # configuration file for the lighthouse stations
 
 # Key bindings info menu (hud_font, right side of screen)
 INFO_MENU_LINES = [
-    ("  KEY BINDINGS",                           (0.10, 0.10, 0.10)),
-    ("",                                          (0.00, 0.00, 0.00)),
-    ("  LMB drag     : rotate view",             (0.20, 0.20, 0.20)),
-    ("  RMB drag     : pan view",                (0.20, 0.20, 0.20)),
-    ("  Scroll       : zoom in / out",           (0.20, 0.20, 0.20)),
-    ("  Middle-click : reset view",              (0.20, 0.20, 0.20)),
-    ("  F11          : toggle fullscreen",       (0.20, 0.20, 0.20)),
-    ("  PgUp / PgDn  : scroll HUD",              (0.20, 0.20, 0.20)),
-    ("",                                          (0.00, 0.00, 0.00)),
-    ("  Shift + W    : world frame on/off",      (0.10, 0.10, 0.55)),
-    ("  Shift + D    : drone body on/off",       (0.10, 0.10, 0.55)),
-    ("  Shift + F    : drone frame on/off",      (0.10, 0.10, 0.55)),
-    ("  Shift + L    : lighthouses on/off",      (0.10, 0.10, 0.55)),
-    ("  Shift + H    : HUD text on/off",         (0.10, 0.10, 0.55)),
-    ("  Shift + T    : scene labels on/off",     (0.10, 0.10, 0.55)),
-    ("  Shift + 0    : show/hide all drones",    (0.10, 0.10, 0.55)),
-    ("  Shift + 1-9  : show/hide drone N",       (0.10, 0.10, 0.55)),
-    ("",                                          (0.00, 0.00, 0.00)),
-    ("  Ctrl  + A    : add drone",               (0.55, 0.10, 0.10)),
-    ("  Ctrl  + D    : delete drone",            (0.55, 0.10, 0.10)),
-    ("  Ctrl  + R    : connect drone(s)",        (0.55, 0.10, 0.10)),
-    ("  Ctrl  + 1-9  : blink LED of drone N",    (0.55, 0.10, 0.10)),
-    ("",                                          (0.00, 0.00, 0.00)),
-    ("  I            : close this menu",         (0.20, 0.20, 0.20)),
-    ("  Escape       : quit",                    (0.20, 0.20, 0.20)),
+    ("  KEY BINDINGS",                             (0.10, 0.10, 0.10)),
+    ("",                                           (0.00, 0.00, 0.00)),
+    ("  LMB drag       : rotate view",             (0.20, 0.20, 0.20)),
+    ("  RMB drag       : pan view",                (0.20, 0.20, 0.20)),
+    ("  Scroll         : zoom in / out",           (0.20, 0.20, 0.20)),
+    ("  Middle-click   : reset view",              (0.20, 0.20, 0.20)),
+    ("  F11            : toggle fullscreen",       (0.20, 0.20, 0.20)),
+    ("  PgUp / PgDn    : scroll HUD",              (0.20, 0.20, 0.20)),
+    ("  I              : close this menu",         (0.20, 0.20, 0.20)),
+    ("  Escape         : quit",                    (0.20, 0.20, 0.20)),
+    ("",                                           (0.00, 0.00, 0.00)),
+    ("  Shift + W      : world frame on/off",      (0.45, 0.10, 0.10)),
+    ("  Shift + D      : drone body on/off",       (0.45, 0.10, 0.10)),
+    ("  Shift + F      : drone frame on/off",      (0.45, 0.10, 0.10)),
+    ("  Shift + L      : lighthouses on/off",      (0.45, 0.10, 0.10)),
+    ("  Shift + H      : HUD text on/off",         (0.45, 0.10, 0.10)),
+    ("  Shift + T      : scene labels on/off",     (0.45, 0.10, 0.10)),
+    ("  Shift + 0      : show/hide all drones",    (0.45, 0.10, 0.10)),
+    ("  Shift + 1-8    : show/hide drone N",       (0.45, 0.10, 0.10)),
+    ("",                                           (0.00, 0.00, 0.00)),
+    ("  Ctrl  + A      : add drone",               (0.10, 0.10, 0.45)),
+    ("  Ctrl  + D      : delete drone",            (0.10, 0.10, 0.45)),
+    ("  Ctrl  + R      : connect drone(s)",        (0.10, 0.10, 0.45)),
+    ("  Ctrl  + 1-8    : blink LED of drone N",    (0.10, 0.10, 0.45)),
+    ("",                                           (0.00, 0.00, 0.00)),
+    ("  Ctrl  + C      : flight controller panel", (0.10, 0.45, 0.10)),
+    ("    F            : liftoff",                 (0.10, 0.45, 0.10)),
+    ("    L            : land",                    (0.10, 0.45, 0.10)),
+    ("    W            : up",                      (0.10, 0.45, 0.10)),
+    ("    S            : down",                    (0.10, 0.45, 0.10)),
+    ("    A / D        : yaw ccw / cw",            (0.10, 0.45, 0.10)),
+    ("    Up / Down    : forward / backward",      (0.10, 0.45, 0.10)),
+    ("    Left / Right : slide left / right",      (0.10, 0.45, 0.10)),
 ]
 
 
@@ -317,7 +316,7 @@ def draw_modal(modal, font, win_w, win_h, cursor_on):
     oy = (win_h - sh) // 2
 
     _begin_2d(win_w, win_h)
-    _draw_filled_rect(0, 0, win_w, win_h, 0., 0., 0., 0.38)  # dim backdrop
+    _draw_filled_rect(0, 0, win_w, win_h, 0., 0., 0., 0.4)  # dim backdrop
     _draw_quad_tex(tex, ox, oy, sw, sh)
     glDeleteTextures(1, [tex])
     _end_2d()
@@ -704,7 +703,7 @@ def draw_hud_scrollable(lines, font, win_w, win_h, scroll_offset):
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
 
     _begin_2d(win_w, win_h)
-    _draw_filled_rect(PAD - 4, PAD - 4, sw + 8, sh + 8, 0.9, 0.9, 0.9, 0.3)
+    _draw_filled_rect(PAD - 4, PAD - 4, sw + 8, sh + 8, 0.9, 0.9, 0.9, 0.7)
     _draw_quad_tex(tex, PAD, PAD, sw, sh)
     glDeleteTextures(1, [tex])
     _end_2d()
@@ -730,8 +729,7 @@ def draw_info_menu(lines, font, win_w, win_h):
     _begin_2d(win_w, win_h)
 
     # semi-transparent background panel
-    _draw_filled_rect(x - 4, y - 4, panel_w + 8, panel_h + 8,
-                      0.9, 0.9, 0.9, 0.7)
+    _draw_filled_rect(x - 4, y - 4, panel_w + 8, panel_h + 8, 0.9, 0.9, 0.9, 0.7)
 
     # text lines
     for i, (surf, (_, col)) in enumerate(zip(surfaces, lines)):
@@ -810,9 +808,19 @@ def _on_resize(w, h):
 # FLEET HELPERS
 # ==============================================================================
 
-def _default_pos(fleet_size):
-    """Return the default spawn position based on how many drones currently exist."""
-    return DEFAULT_POSITIONS[fleet_size % len(DEFAULT_POSITIONS)]
+def _default_pos(drone_num):
+    """
+    Compute the default spawn position from the 1-indexed drone number.
+    Groups of 4 drones are placed on concentric rings at radii 1, 2, 3, ...
+    within each ring the four corners are: (-r, +r), (+r, +r), (+r, -r), (-r, -r).
+    This extends infinitely so no lookup table cap exists.
+    """
+    group  = (drone_num - 1) // 4          # ring index (0, 1, 2, ...)
+    idx    = (drone_num - 1) % 4           # position within the ring (0-3)
+    r      = float(group + 1)              # ring radius in metres
+    signs  = [(-1., 1.), (1., 1.), (1., -1.), (-1., -1.)]
+    sx, sy = signs[idx]
+    return (sx * r, sy * r, 0.)
 
 
 def _build_uri(radio_id, channel, datarate, address):
@@ -863,7 +871,7 @@ def _handle_modal_confirm(modal, drones):
         address  = modal.fields[3].value.strip() or "E7E7E7E7E7"
         uri      = _build_uri(radio_id, channel, datarate, address)
         new_num  = max(drones.keys(), default = 0) + 1
-        pos      = _default_pos(len(drones))
+        pos      = _default_pos(new_num)
         drones[new_num] = DroneEntry(new_num, uri, pos)
         print(f"[INFO] Added CF {new_num} → {uri}  (pos {pos})")
         print(f"[INFO] Use Ctrl+R to connect.")
@@ -896,7 +904,170 @@ def _handle_modal_confirm(modal, drones):
             print(f"[WARN] Drone {n} not found in fleet.")
 
 
-def _build_hud_lines(drones, lighthouses, camera, show_info_menu):
+def draw_controller_panel(ctrl_strs, ctrl_focused, font, win_w, win_h, cursor_on):
+    """
+    Render the flight controller panel in the bottom-right corner.
+
+    Parameters:
+        ctrl_strs   : list of 3 strings [drone_num, dx, dq]
+        ctrl_focused: index (0-2) of the currently focused field
+        font        : pygame font
+        win_w, win_h: window size
+        cursor_on   : bool - whether the text cursor blink phase is on
+    """
+    PAD    = 10
+    LINE_H = font.get_height() + 6
+
+    LABELS   = ["Drone (0=all)     ", "linear step (m)   ", "angular step (deg)"]
+    FIELD_W  = 90
+
+    ROWS = [
+        ("FLIGHT CONTROLLER  [Ctrl+C]", None),
+        ("─" * 34,                      None),
+        None,   # Drone field
+        None,   # dx field
+        None,   # dq field
+        ("─" * 34,                      None),
+        ("[F] Liftoff      [L] Land",    (0.10, 0.50, 0.10)),
+        ("[W] Up ↑         [S] Down ↓",  (0.10, 0.50, 0.10)),
+        ("[A] Yaw ←        [D] Yaw →",   (0.10, 0.50, 0.10)),
+        ("[↑] Forward      [↓] Back",    (0.10, 0.50, 0.10)),
+        ("[←] Slide L      [→] Slide R", (0.10, 0.50, 0.10)),
+        ("Tab: cycle fields",            (0.40, 0.40, 0.40)),
+    ]
+
+    # measure panel width
+    tmp_surf = pygame.Surface((1, 1))
+    max_w = max(font.size(r[0] if r else LABELS[0] + "  " + ctrl_strs[0])[0]
+                for r in ROWS if r is not None)
+    panel_w  = max(max_w + 24, FIELD_W + font.size(LABELS[0])[0] + 32)
+    panel_h  = LINE_H * len(ROWS) + 2 * PAD
+
+    surf = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+    surf.fill((240, 240, 236, 210))
+    pygame.draw.rect(surf, (80, 80, 80), (0, 0, panel_w, panel_h), 2)
+
+    y = PAD
+    field_idx = 0
+    for row in ROWS:
+        if row is None:
+            # editable field row
+            label = LABELS[field_idx]
+            val   = ctrl_strs[field_idx]
+            focused = (field_idx == ctrl_focused)
+            lbl_surf = font.render(label + " : ", True, (30, 30, 30))
+            surf.blit(lbl_surf, (PAD, y + 1))
+            box_x = PAD + lbl_surf.get_width()
+            box   = pygame.Rect(box_x, y, FIELD_W, LINE_H - 2)
+            pygame.draw.rect(surf, (200, 218, 255) if focused else (255, 255, 255), box)
+            pygame.draw.rect(surf, (60, 60, 60), box, 1)
+            display = val + ("|" if focused and cursor_on else "")
+            surf.blit(font.render(display, True, (10, 10, 10)), (box_x + 4, y + 2))
+            field_idx += 1
+        else:
+            text, col = row
+            col255 = tuple(int(c * 255) for c in col) if col else (20, 20, 80)
+            surf.blit(font.render(text, True, col255), (PAD, y + 1))
+        y += LINE_H
+
+    # blit to screen as OpenGL texture (bottom-right corner)
+    sw, sh = surf.get_size()
+    raw = pygame.image.tostring(surf, "RGBA", True)
+    tex = glGenTextures(1)
+    glBindTexture(GL_TEXTURE_2D, tex)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, sw, sh, 0, GL_RGBA, GL_UNSIGNED_BYTE, raw)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+
+    ox = win_w - sw - 10
+    oy = win_h - sh - 10
+
+    _begin_2d(win_w, win_h)
+    _draw_quad_tex(tex, ox, oy, sw, sh)
+    glDeleteTextures(1, [tex])
+    _end_2d()
+
+
+def _ctrl_parse(ctrl_strs):
+    """
+    Parse controller panel field strings.
+    Returns (drone_num: int, dx: float, dq: float).
+    """
+    try:    dn = int(ctrl_strs[0])
+    except: dn = 0
+    try:    dx = float(ctrl_strs[1])
+    except: dx = 0.5
+    try:    dq = float(ctrl_strs[2])
+    except: dq = 15.0
+    return dn, dx, dq
+
+
+def _send_flight_cmd(cmd, ctrl_strs, drones):
+    """
+    Dispatch a flight command to the selected drone(s).
+
+    Commands:
+        "takeoff"                : rise to dx height
+        "land"                   : land
+        "up"   / "down"          : translate ±dx in world Z
+        "forward" / "backward"   : translate ±dx in body-frame forward (world XY)
+        "slide_left"/"slide_right: translate ±dx in body-frame lateral (world XY)
+        "yaw_ccw" / "yaw_cw"     : rotate ±dq degrees around Z
+
+    Forward/backward and slide movements are expressed in body frame:
+    the world-frame deltas are computed from the drone's current yaw.
+    """
+    dn, dx, dq = _ctrl_parse(ctrl_strs)
+    targets = (list(drones.values()) if dn == 0
+               else ([drones[dn]] if dn in drones else []))
+
+    for entry in targets:
+        t = entry.thread
+        if t is None or not entry.state.connected:
+            print(f"[CTRL] CF {entry.num} not connected - command '{cmd}' skipped.")
+            continue
+
+        if cmd == "takeoff":
+            t.takeoff(height = dx)
+
+        elif cmd == "land":
+            t.land()
+
+        elif cmd == "up":
+            t.go_to(dz = +dx)
+
+        elif cmd == "down":
+            t.go_to(dz = -dx)
+
+        elif cmd in ("forward", "backward", "slide_left", "slide_right"):
+            # resolve body-frame movement into world frame using current yaw
+            _, _, _, _, yaw, _, _ = entry.state.get()
+            yr = math.radians(yaw)
+            # body +x = forward, body +y = left (ENU convention)
+            fwd = np.array([ math.cos(yr),  math.sin(yr)])
+            lft = np.array([-math.sin(yr),  math.cos(yr)])
+            if   cmd == "forward":     vec = fwd * dx
+            elif cmd == "backward":    vec = fwd * (-dx)
+            elif cmd == "slide_left":  vec = lft * dx
+            elif cmd == "slide_right": vec = lft * (-dx)
+            t.go_to(dx = float(vec[0]), dy = float(vec[1]))
+
+        elif cmd == "yaw_cw":
+            t.go_to(dyaw_deg = -dq)
+
+        elif cmd == "yaw_ccw":
+            t.go_to(dyaw_deg = +dq)
+
+
+# allowed characters for controller panel field editing
+_CTRL_ALLOWED = [
+    "0123456789",            # drone number: digits only
+    "-0123456789.",          # dx: float
+    "-0123456789.",          # dq: float
+]
+
+
+def _build_hud_lines(drones, lighthouses, camera, show_info_menu, show_ctrl_panel, xbox):
     """
     Build the complete scrollable HUD line list.
 
@@ -904,20 +1075,37 @@ def _build_hud_lines(drones, lighthouses, camera, show_info_menu):
         (text_str, rgb_float_tuple)  - normal line
         (None, None)                 - thin separator
     """
-    info_hint = "[i] close menu" if show_info_menu else "[i] key bindings"
+    info_hint    = "[i] close menu" if show_info_menu else "[i] key bindings"
+    ctrl_hint    = "[Ctrl+C] close panel" if show_ctrl_panel else "[Ctrl+C] flight panel"
     lines = []
 
     # general info (always visible at the top)
-    lines.append((f"Ground Grid : {GROUND_CELL_M:.1f} m/cell  "
+    lines.append((f"Ground Grid   : {GROUND_CELL_M:.3f} m/cell  "
                   f"({GROUND_N_CELLS * 2} x {GROUND_N_CELLS * 2} cells)",
-                  (0.15, 0.15, 0.15)))
-    lines.append((f"LH Stations : {len(lighthouses)}",
-                  (0.70, 0.10, 0.70)))
-    lines.append((f"Camera lookat : ({camera.lookat[0]:.2f}, "
-                  f"{camera.lookat[1]:.2f}, {camera.lookat[2]:.2f})",
-                  (0.25, 0.25, 0.25)))
-    lines.append((info_hint + "   PgUp/PgDn: scroll",
+                  (0.20, 0.20, 0.20)))
+    lines.append((f"Camera Lookat : ({camera.lookat[0]:.3f}, "
+                  f"{camera.lookat[1]:.3f}, {camera.lookat[2]:.3f})",
+                  (0.20, 0.20, 0.20)))
+    lines.append(("PgUp/PgDn: scroll          " + info_hint,
                   (0.30, 0.30, 0.30)))
+    
+    lines.append((None, None))
+    lines.append((f"LightHouse Stations : {len(lighthouses)}",
+                  (0.70, 0.10, 0.70)))
+
+    lines.append((None, None))
+    lines.append((ctrl_hint, (0.10, 0.50, 0.10)))
+
+    # Xbox controller status
+    if xbox is not None:
+        if xbox.is_connected():
+            xbox_col  = (0.10, 0.50, 0.50)
+            xbox_name = xbox.controller_name()
+            xbox_str  = f"Xbox : {xbox_name}  [{xbox.mode.upper()}]  CF {xbox.controlled_num}"
+        else:
+            xbox_col = (0.40, 0.40, 0.40)
+            xbox_str = "Xbox : not connected"
+        lines.append((xbox_str, xbox_col))
 
     if not drones:
         lines.append((None, None))
@@ -979,15 +1167,18 @@ def main():
 
     # pygame + OpenGL init
     pygame.init()
+    pygame.joystick.init()
     display_info = pygame.display.Info()
     WINDOW_W = int(3/4 * display_info.current_w)
     WINDOW_H = int(3/4 * display_info.current_h)
     pygame.display.set_mode((WINDOW_W, WINDOW_H), DOUBLEBUF | OPENGL | RESIZABLE)
     pygame.display.set_caption("Crazyflie 3D Visualizer")
 
-    scene_font = pygame.font.SysFont(name = "monospace", size = 15, bold = True, italic = True)
-    hud_font   = pygame.font.SysFont(name = "monospace", size = 13, bold = True)
-    modal_font = pygame.font.SysFont(name = "monospace", size = 14, bold = True)
+    hud_font     = pygame.font.SysFont(name = "consolas", size = 13, bold = True)
+    control_font = pygame.font.SysFont(name = "lucidaconsole", size = 13, bold = True)
+    info_font    = pygame.font.SysFont(name = "couriernew", size = 11, bold = True)
+    scene_font   = pygame.font.SysFont(name = "arial", size = 14, bold = True, italic = True)
+    modal_font   = pygame.font.SysFont(name = "consolas", size = 14, bold = True)
 
     # depth & blending
     glEnable(GL_DEPTH_TEST)
@@ -1030,6 +1221,15 @@ def main():
     # active modal dialog (None when no dialog is open)
     modal = None
 
+    # flight controller panel state
+    show_ctrl_panel = False
+    ctrl_focused    = 0                          # 0 = drone, 1 = dx, 2 = dq
+    ctrl_strs       = ["0", "0.50", "15.0"]     # editable field values
+
+    # Xbox controller (connects automatically if a joystick is detected)
+    xbox = XboxController(drones)
+    xbox.start()
+
     print("[INFO] No drones in fleet. Use Ctrl+A to add one, then Ctrl+R to connect.")
 
     running = True
@@ -1059,6 +1259,21 @@ def main():
                     continue
 
                 mods = pygame.key.get_mods()
+
+                # controller panel intercepts Tab and editable-character input
+                # (flight action keys are still active while panel is open)
+                if show_ctrl_panel and not (mods & (KMOD_SHIFT | KMOD_CTRL)):
+                    if evt.key == K_TAB:
+                        ctrl_focused = (ctrl_focused + 1) % 3
+                        continue
+                    if evt.key == pygame.K_BACKSPACE:
+                        ctrl_strs[ctrl_focused] = ctrl_strs[ctrl_focused][:-1]
+                        continue
+                    if (evt.unicode and
+                            (evt.unicode in _CTRL_ALLOWED[ctrl_focused] or
+                             (ctrl_focused > 0 and evt.unicode == '-' and not ctrl_strs[ctrl_focused]))):
+                        ctrl_strs[ctrl_focused] += evt.unicode
+                        continue
 
                 if evt.key == K_ESCAPE:
                     running = False
@@ -1120,13 +1335,40 @@ def main():
                     else:
                         print("[INFO] No drones in fleet. Use Ctrl+A to add one first.")
 
-                # Ctrl + numkey (1-9) : blink LED of drone N
+                # Ctrl + C : toggle flight controller panel
+                elif evt.key == K_c and (mods & KMOD_CTRL):
+                    show_ctrl_panel = not show_ctrl_panel
+
+                # Ctrl + numkey (1-8) : blink LED of drone N
                 elif (mods & KMOD_CTRL) and pygame.K_1 <= evt.key <= pygame.K_9:
                     n = evt.key - pygame.K_0
                     if n in drones and drones[n].thread is not None:
                         drones[n].thread.blink_led()
                     else:
                         print(f"[INFO] CF {n} not connected - cannot blink LED.")
+
+                # flight action keys (active when controller panel is open)
+                elif show_ctrl_panel and not (mods & (KMOD_SHIFT | KMOD_CTRL)):
+                    if evt.key == K_f:
+                        _send_flight_cmd("takeoff",     ctrl_strs, drones)
+                    elif evt.key == K_l:
+                        _send_flight_cmd("land",        ctrl_strs, drones)
+                    elif evt.key == K_w:
+                        _send_flight_cmd("up",          ctrl_strs, drones)
+                    elif evt.key == K_s:
+                        _send_flight_cmd("down",        ctrl_strs, drones)
+                    elif evt.key == K_a:
+                        _send_flight_cmd("yaw_ccw",     ctrl_strs, drones)
+                    elif evt.key == K_d:
+                        _send_flight_cmd("yaw_cw",      ctrl_strs, drones)
+                    elif evt.key == K_UP:
+                        _send_flight_cmd("forward",     ctrl_strs, drones)
+                    elif evt.key == K_DOWN:
+                        _send_flight_cmd("backward",    ctrl_strs, drones)
+                    elif evt.key == K_LEFT:
+                        _send_flight_cmd("slide_left",  ctrl_strs, drones)
+                    elif evt.key == K_RIGHT:
+                        _send_flight_cmd("slide_right", ctrl_strs, drones)
 
             elif evt.type == MOUSEBUTTONDOWN:
                 if modal is not None:
@@ -1202,12 +1444,17 @@ def main():
 
         # HUD overlay (left side, scrollable)
         if show_hud_text:
-            hud_lines       = _build_hud_lines(drones, lighthouses, camera, show_info_menu)
+            hud_lines       = _build_hud_lines(drones, lighthouses, camera,
+                                               show_info_menu, show_ctrl_panel, xbox)
             hud_total_lines = draw_hud_scrollable(hud_lines, hud_font, WINDOW_W, WINDOW_H, hud_scroll)
 
         # key bindings info menu (right side)
         if show_info_menu:
-            draw_info_menu(INFO_MENU_LINES, hud_font, WINDOW_W, WINDOW_H)
+            draw_info_menu(INFO_MENU_LINES, info_font, WINDOW_W, WINDOW_H)
+
+        # flight controller panel (bottom-right corner)
+        if show_ctrl_panel:
+            draw_controller_panel(ctrl_strs, ctrl_focused, control_font, WINDOW_W, WINDOW_H, cursor_on)
 
         # modal dialog (centered, with dimmed background)
         if modal is not None:
@@ -1216,6 +1463,7 @@ def main():
         pygame.display.flip()
 
     # cleanup
+    xbox.stop()
     for entry in drones.values():
         entry.stop_connection()
     pygame.quit()

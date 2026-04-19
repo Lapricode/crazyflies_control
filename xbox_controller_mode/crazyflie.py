@@ -15,6 +15,7 @@ try:
     from cflib.crazyflie import Crazyflie
     from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
     from cflib.crazyflie.log import LogConfig
+    from cflib.crazyflie.high_level_commander import HighLevelCommander
     CFLIB_AVAILABLE = True
 except ImportError:
     CFLIB_AVAILABLE = False
@@ -163,7 +164,8 @@ class CrazyflieThread(threading.Thread):
         self.uri   = uri
         self.state = state
         self._stop = threading.Event()
-        self._cf   = None  # live Crazyflie handle, set inside run() and used by blink_led()
+        self._cf   = None   # live Crazyflie handle, set inside run() and used by blink_led()
+        self._hlc  = None   # HighLevelCommander instance, valid while connected
 
     def run(self):
         if not CFLIB_AVAILABLE:
@@ -176,6 +178,15 @@ class CrazyflieThread(threading.Thread):
                 self._cf = scf.cf
                 self.state.connected = True
                 print(f"[CFLIB] Connected: {self.uri}")
+
+                # enable high-level commander
+                try:
+                    scf.cf.param.set_value('commander.enHighLevel', '1')
+                    time.sleep(0.05)
+                    self._hlc = HighLevelCommander(scf.cf)
+                    print(f"[CFLIB] High-level commander ready.")
+                except Exception as exc:
+                    print(f"[CFLIB] Could not enable high-level commander: {exc}")
 
                 # read stabilizer parameters once at connection time
                 try:
@@ -264,7 +275,8 @@ class CrazyflieThread(threading.Thread):
         except Exception as exc:
             print(f"[CFLIB] Connection error ({self.uri}): {exc}")
         finally:
-            self._cf = None
+            self._cf  = None
+            self._hlc = None
             self.state.connected = False
 
     def stop(self):
@@ -292,3 +304,80 @@ class CrazyflieThread(threading.Thread):
                     break
 
         threading.Thread(target = _do_blink, daemon = True, name = "led-blink").start()
+
+    # --------------------------------------------------------------------------
+    # High-level flight commands (require commander.enHighLevel = 1)
+    # --------------------------------------------------------------------------
+
+    def takeoff(self, height = 0.5, duration = 2.0):
+        """
+        Take off to the specified height above the current position.
+        Parameters:
+            height   : target height in metres above ground
+            duration : time in seconds to complete the manoeuvre
+        """
+        hlc = self._hlc
+        if hlc is None:
+            print(f"[CFLIB] High-level commander not ready ({self.uri})")
+            return
+        hlc.takeoff(height, duration)
+
+    def land(self, duration = 2.0):
+        """
+        Land the drone.
+        Parameters:
+            duration : time in seconds to complete the descent
+        """
+        hlc = self._hlc
+        if hlc is None:
+            print(f"[CFLIB] High-level commander not ready ({self.uri})")
+            return
+        hlc.land(0.0, duration)
+
+    def go_to(self, dx = 0., dy = 0., dz = 0., dyaw_deg = 0., duration = 1.5):
+        """
+        Move relative to the current position setpoint in world frame.
+        Parameters:
+            dx, dy, dz : translation offsets in metres (world frame)
+            dyaw_deg   : yaw rotation offset in degrees
+            duration   : time in seconds to complete the move
+        """
+        hlc = self._hlc
+        if hlc is None:
+            print(f"[CFLIB] High-level commander not ready ({self.uri})")
+            return
+        hlc.go_to(dx, dy, dz, math.radians(dyaw_deg), duration, relative = True)
+
+    def emergency_stop(self):
+        """Immediately cut all motors (use only in emergencies)."""
+        cf = self._cf
+        if cf is None:
+            return
+        cf.commander.send_stop_setpoint()
+
+    def send_setpoint(self, roll, pitch, yawrate, thrust):
+        """
+        Send a low-level attitude setpoint (manual flight mode).
+        Parameters:
+            roll     : roll angle in degrees  (-180 … +180)
+            pitch    : pitch angle in degrees (-180 … +180)
+            yawrate  : yaw rate in degrees/s  (-400 … +400)
+            thrust   : motor thrust           (0 … 65535)
+        """
+        cf = self._cf
+        if cf is None:
+            return
+        cf.commander.send_setpoint(roll, pitch, yawrate, int(thrust))
+
+    def send_hover_setpoint(self, vx, vy, yawrate, zdot):
+        """
+        Send a velocity hover setpoint (auto height-hold mode).
+        Parameters:
+            vx, vy  : horizontal velocity in m/s (body-frame forward/left)
+            yawrate : yaw rate in degrees/s
+            zdot    : vertical velocity in m/s
+        """
+        cf = self._cf
+        if cf is None:
+            return
+        cf.commander.send_hover_setpoint(vx, vy, yawrate, zdot)
