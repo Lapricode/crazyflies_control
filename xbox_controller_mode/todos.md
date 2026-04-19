@@ -57,3 +57,7 @@ TODOs
 - Add alt + numkey binding (numkey 1-8) for tracking a specific drone (it should go together with the shift bindings, in the info panel). This means that the camera lookat point should be following the origin of the specified crazyflie. Also, add alt + 0 binding for resetting to manual mode, where the camera lookat point is contrlled by panning with the mouse, as before.
 
 - Add shift + c binding for showing the console/terminal prints. It should open/close a window in the bottom middle of the pygame window. The console window should not cover (in other words it should not be above) the hud or the flight controller, it should be the proper length to appear separated.
+
+- Add ctrl + alt + numkey binding (numkey 1-8) to put the camera on the specified drone body's frame origin, looking towards the body's x direction of the drone. LMB drag now makes the movement of an eye rolling around, while the RMB drag does not do anything. The zoom in / zoom out now is again the camera's zooming, but the zoom out should not do anything when we insert into this drone's self-aware mode with ctrl + alt + numkey (it is on its limit), only works if we have already zoomed in by some amount. The alt + 0 binding again resets to manual camera tracking.
+
+- Add an info window about the bindings defined for the xbox controller. It should open/close using the binding shift + x, and it should appear in the position the flight controller panel is also located. I give you the xbox_controller code to remind you about the controls.

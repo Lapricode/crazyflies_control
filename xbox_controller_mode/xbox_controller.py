@@ -65,7 +65,7 @@ MAX_ATTITUDE_DEG  = 25.0    # max roll/pitch in degrees
 
 # Movement step sizes for discrete d-pad commands (auto mode)
 STEP_LARGE_M      = 0.5     # metres (large step, default)
-STEP_SMALL_M      = 0.15    # metres (small step, A button held)
+STEP_SMALL_M      = 0.1     # metres (small step, A button held)
 STEP_LARGE_DEG    = 15.0    # degrees yaw (large step)
 STEP_SMALL_DEG    = 5.0     # degrees yaw (small step)
 

@@ -33,7 +33,7 @@ import numpy as np
 import pygame
 from pygame.locals import (
     DOUBLEBUF, OPENGL, QUIT, KEYDOWN, RESIZABLE, VIDEORESIZE,
-    K_ESCAPE, K_i, K_w, K_s, K_d, K_f, K_l, K_h, K_t, K_r, K_a, K_c,
+    K_ESCAPE, K_i, K_w, K_s, K_d, K_f, K_l, K_h, K_t, K_r, K_a, K_c, K_x,
     K_F11, K_PAGEUP, K_PAGEDOWN, K_TAB, K_RETURN,
     K_UP, K_DOWN, K_LEFT, K_RIGHT,
     MOUSEBUTTONDOWN, MOUSEBUTTONUP, MOUSEMOTION,
@@ -86,10 +86,12 @@ INFO_MENU_LINES = [
     ("  Shift + H      : HUD text on/off",         (0.45, 0.10, 0.10)),
     ("  Shift + C      : console prints on/off",   (0.45, 0.10, 0.10)),
     ("  Shift + T      : scene labels on/off",     (0.45, 0.10, 0.10)),
+    ("  Shift + X      : Xbox bindings panel",     (0.45, 0.10, 0.10)),
     ("  Shift + 0      : show/hide all drones",    (0.45, 0.10, 0.10)),
     ("  Shift + 1-8    : show/hide drone N",       (0.45, 0.10, 0.10)),
     ("  Alt   + 0      : reset camera tracking",   (0.45, 0.10, 0.45)),
     ("  Alt   + 1-8    : track drone N",           (0.45, 0.10, 0.45)),
+    ("  Ctrl+Alt + 1-8 : first-person on drone N", (0.45, 0.10, 0.45)),
     ("",                                           (0.00, 0.00, 0.00)),
     ("  Ctrl  + A      : add drone",               (0.10, 0.10, 0.45)),
     ("  Ctrl  + D      : delete drone",            (0.10, 0.10, 0.45)),
@@ -140,6 +142,10 @@ class Camera:
         self.el     =  60.0                    # initial elevation (degrees, up/down)
         self.lookat = np.array([0., 0., 0.])   # world look-at target point
         self.dist   =  5.0                     # initial distance from the world look-at point (m)
+        # first-person mode state (used by apply_first_person / first_person_rotate)
+        self._fp_yaw   = 0.0                 # yaw offset from body +X, degrees
+        self._fp_pitch = 0.0                 # pitch offset, degrees
+        self._fp_zoom  = 1.1 * DRONE_ARM_L   # forward offset along look direction, metres
 
     def rotate(self, dx, dy):
         self.az  += dx * 0.4
@@ -158,7 +164,57 @@ class Camera:
 
     def zoom(self, sign):
         factor = 0.99 if sign > 0 else 1.01
-        self.dist = max(0.1, min(100., self.dist * factor))
+        self.dist = max(DRONE_ARM_L, min(10. * GROUND_N_CELLS * GROUND_CELL_M, self.dist * factor))
+
+    def apply_first_person(self, pwb, Rwb, pitch_off_deg, yaw_off_deg, zoom_dist):
+        """
+        First-person camera: eye placed at pwb (drone origin), looking toward the
+        body +X axis, with optional pitch/yaw offsets added by mouse dragging.
+        zoom_dist moves the eye forward along the look direction (starts at 0).
+
+        Parameters:
+            pwb          : (3,) drone world position
+            Rwb          : (3,3) drone rotation matrix (columns = body axes in world)
+            pitch_off_deg: up/down offset from body +X, degrees
+            yaw_off_deg  : left/right offset from body +X, degrees
+            zoom_dist    : metres forward along look direction (0 = at drone origin)
+        """
+        bx = Rwb[:, 0]   # body forward (+X)
+        by = Rwb[:, 1]   # body left    (+Y)
+        bz = Rwb[:, 2]   # body up      (+Z)
+
+        # first apply yaw offset (rotation around body +Z)
+        yr   = math.radians(yaw_off_deg)
+        look = math.cos(yr) * bx - math.sin(yr) * by
+
+        # then apply pitch offset (rotation around the resulting "right" vector)
+        pr    = math.radians(pitch_off_deg)
+        look  = math.cos(pr) * look + math.sin(pr) * bz
+        norm  = np.linalg.norm(look)
+        if norm > 1e-9:
+            look /= norm
+
+        eye    = pwb + look * zoom_dist
+        center = eye + look
+        up     = bz
+
+        glLoadIdentity()
+        gluLookAt(
+            eye[0],    eye[1],    eye[2],
+            center[0], center[1], center[2],
+            up[0],     up[1],     up[2],
+        )
+
+    def first_person_rotate(self, dx, dy):
+        """Adjust yaw/pitch offsets for first-person look."""
+        self._fp_yaw   -= dx * 0.3
+        self._fp_pitch  = max(-89., min(89., self._fp_pitch + dy * 0.3))
+
+    def reset_first_person(self):
+        """Reset first-person look offsets and zoom."""
+        self._fp_yaw   = 0.0
+        self._fp_pitch = 0.0
+        self._fp_zoom  = 1.1 * DRONE_ARM_L
 
 
 # ==============================================================================
@@ -1147,6 +1203,118 @@ def draw_controller_panel(ctrl_strs, ctrl_focused, font, win_w, win_h, cursor_on
     _end_2d()
 
 
+def draw_xbox_panel(font, win_w, win_h, ctrl_panel_h):
+    """
+    Render the Xbox controller bindings panel in the bottom-right corner,
+    stacked above the flight controller panel when both are visible.
+
+    Parameters:
+        font         : pygame font
+        win_w, win_h : window dimensions in pixels
+        ctrl_panel_h : height (px) of the flight controller panel below this one,
+                       or 0 if it is hidden.  Used to stack the panels vertically.
+    """
+    PAD    = 10
+    LINE_H = font.get_height() + 5
+
+    # Section colours
+    HDR_COL  = (20,  20,  80)
+    SEC_COL  = (60,  60, 140)
+    KEY_COL  = (10, 120,  10)
+    VAL_COL  = (20,  20,  20)
+    DIM_COL  = (110, 110, 110)
+    SEP_COL  = (120, 120, 120)
+
+    # Each row is either:
+    #   (text, colour)        - plain text row
+    #   ("---", SEP_COL)      - drawn as a horizontal rule
+    ROWS = [
+        ("XBOX CONTROLLER  [Shift+X]",               HDR_COL ),
+        ("---",                                      SEP_COL ),
+
+        # mode
+        ("Mode  [M/Guide btn]",                      SEC_COL ),
+        ("  manual ↔ auto",                          VAL_COL ),
+
+        ("---",                                      SEP_COL ),
+
+        # sticks – shared
+        ("Sticks  (manual & auto)",                  SEC_COL ),
+        ("  L-stick ↑↓  : thrust / zdot",            KEY_COL ),
+        ("  L-stick ←→  : yaw rate  ±360°/s",        KEY_COL ),
+        ("  R-stick ←→  : roll / slide ±25°/0.5m",   KEY_COL ),
+        ("  R-stick ↑↓  : pitch / fwd  ±25°/0.5m",   KEY_COL ),
+
+        ("---",                                      SEP_COL ),
+
+        # discrete steps – auto mode only
+        ("D-pad  (auto only)",                       SEC_COL ),
+        ("  ↑ / ↓        : altitude  ±step",         KEY_COL ),
+        ("  ← / →        : slide     ±step",         KEY_COL ),
+        ("  A (held)     : small step (0.1m / 5°)",  KEY_COL ),
+        ("  B (held)     : large step (0.5m / 15°)", KEY_COL ),
+
+        ("---",                                      SEP_COL ),
+
+        # auto mode buttons
+        ("Start  (auto only)",                       SEC_COL ),
+        ("  Start        : takeoff / land toggle",   KEY_COL ),
+
+        ("---",                                      SEP_COL ),
+
+        # drone selection
+        ("Drone selection  (manual & auto)",         SEC_COL ),
+        ("  LB / RB       : cycle number",           KEY_COL ),
+        ("  Select        : confirm selection",      KEY_COL ),
+        ("  (other input) : cancel selection",       DIM_COL ),
+
+        ("---",                                      SEP_COL ),
+
+        # safety & misc
+        ("Safety & misc",                            SEC_COL ),
+        ("  LT (>50%)     : emergency stop",         (180, 40, 40)),
+        ("  RT (>50%)     : blink drone LED",        KEY_COL ),
+    ]
+
+    # Measure panel width from the longest row text
+    max_w   = max(font.size(r[0])[0] for r in ROWS if r[0] != "---")
+    panel_w = max_w + 2 * PAD + 4
+    panel_h = LINE_H * len(ROWS) + 2 * PAD
+
+    surf = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+    surf.fill((235, 235, 245, 215))
+    pygame.draw.rect(surf, (80, 80, 110), (0, 0, panel_w, panel_h), 2)
+
+    y = PAD
+    for text, col in ROWS:
+        if text == "---":
+            # horizontal separator
+            pygame.draw.line(surf, col,
+                             (PAD, y + LINE_H // 2),
+                             (panel_w - PAD, y + LINE_H // 2), 1)
+        else:
+            surf.blit(font.render(text, True, col), (PAD, y))
+        y += LINE_H
+
+    # Upload as OpenGL texture and draw
+    sw, sh = surf.get_size()
+    raw = pygame.image.tostring(surf, "RGBA", True)
+    tex = glGenTextures(1)
+    glBindTexture(GL_TEXTURE_2D, tex)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, sw, sh, 0, GL_RGBA, GL_UNSIGNED_BYTE, raw)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+
+    ox = win_w - sw - 10
+    # stack above the flight controller panel (or sit at the bottom edge if it is hidden)
+    oy = win_h - sh - 10 - (ctrl_panel_h + 6 if ctrl_panel_h > 0 else 0)
+
+    _begin_2d(win_w, win_h)
+    _draw_quad_tex(tex, ox, oy, sw, sh)
+    glDeleteTextures(1, [tex])
+    _end_2d()
+
+
 def _ctrl_parse(ctrl_strs):
     """
     Parse controller panel field strings.
@@ -1502,11 +1670,14 @@ def main():
 
     # flight controller panel state
     show_ctrl_panel = False
-    ctrl_focused    = 0                          # 0 = drone, 1 = dx, 2 = dq
-    ctrl_strs       = ["0", "0.50", "15.0"]     # editable field values
+    show_xbox_panel = False
+    ctrl_focused    = 0                       # 0 = drone, 1 = dx, 2 = dq
+    ctrl_strs       = ["0", "0.50", "15.0"]   # editable field values
 
     # camera tracking state (None = manual, int = track drone N)
     camera_track_num = None
+    # camera self-aware state (None = off, int = first-person on drone N)
+    camera_self_num  = None
 
     # Xbox controller (connects automatically if a joystick is detected)
     xbox = XboxController(drones)
@@ -1589,6 +1760,8 @@ def main():
                     show_console = not show_console
                 elif evt.key == K_t and (mods & KMOD_SHIFT):
                     show_scene_text = not show_scene_text
+                elif evt.key == K_x and (mods & KMOD_SHIFT):
+                    show_xbox_panel = not show_xbox_panel
 
                 # Shift + numkey : show/hide individual drones (0 = all)
                 elif (mods & KMOD_SHIFT) and pygame.K_0 <= evt.key <= pygame.K_9:
@@ -1600,6 +1773,33 @@ def main():
                             e.visible = not any_visible
                     elif n in drones:
                         drones[n].visible = not drones[n].visible
+
+                # Alt + 0 : reset camera tracking (clears both track and self-aware modes)
+                elif evt.key == pygame.K_0 and (mods & KMOD_ALT):
+                    camera_track_num = None
+                    camera_self_num  = None
+                    print("[INFO] Camera tracking disabled.")
+
+                # Alt + numkey (1-8) : follow drone N (arcball lookat)
+                elif (mods & KMOD_ALT) and not (mods & KMOD_CTRL) and pygame.K_1 <= evt.key <= pygame.K_8:
+                    n = evt.key - pygame.K_0
+                    if n in drones:
+                        camera_track_num = n
+                        camera_self_num  = None
+                        print(f"[INFO] Camera tracking CF {n}.")
+                    else:
+                        print(f"[INFO] CF {n} not in fleet.")
+
+                # Ctrl + Alt + numkey (1-8) : first-person camera on drone N
+                elif (mods & KMOD_CTRL) and (mods & KMOD_ALT) and pygame.K_1 <= evt.key <= pygame.K_8:
+                    n = evt.key - pygame.K_0
+                    if n in drones:
+                        camera_self_num  = n
+                        camera_track_num = None
+                        camera.reset_first_person()
+                        print(f"[INFO] First-person camera on CF {n}.")
+                    else:
+                        print(f"[INFO] CF {n} not in fleet.")
 
                 # Ctrl + A : add drone (limit 8)
                 elif evt.key == K_a and (mods & KMOD_CTRL):
@@ -1652,20 +1852,6 @@ def main():
                     else:
                         print(f"[INFO] CF {n} not connected - cannot blink LED.")
 
-                # Alt + 0 : reset camera tracking
-                elif evt.key == pygame.K_0 and (mods & KMOD_ALT):
-                    camera_track_num = None
-                    print("[INFO] Camera tracking disabled.")
-
-                # Alt + numkey (1-8) : track drone N
-                elif (mods & KMOD_ALT) and pygame.K_1 <= evt.key <= pygame.K_8:
-                    n = evt.key - pygame.K_0
-                    if n in drones:
-                        camera_track_num = n
-                        print(f"[INFO] Camera tracking CF {n}.")
-                    else:
-                        print(f"[INFO] CF {n} not in fleet.")
-
                 # flight action keys (active when controller panel is open)
                 elif show_ctrl_panel and not (mods & (KMOD_SHIFT | KMOD_CTRL)):
                     if evt.key == K_f:
@@ -1696,12 +1882,24 @@ def main():
                     prev_mouse_xy = pygame.mouse.get_pos()
                     cur_button = "rotate"
                 elif evt.button == 2:
-                    camera.reset_view()  # middle-click: reset view
+                    if camera_self_num is None:
+                        camera.reset_view()      # middle-click: reset view (not in FP mode)
                 elif evt.button == 3:
-                    prev_mouse_xy = pygame.mouse.get_pos()
-                    cur_button = "pan"
-                elif evt.button == 4: camera.zoom(+1)  # scroll up   = zoom in
-                elif evt.button == 5: camera.zoom(-1)  # scroll down = zoom out
+                    if camera_self_num is None:  # RMB pan disabled in first-person mode
+                        prev_mouse_xy = pygame.mouse.get_pos()
+                        cur_button = "pan"
+                elif evt.button == 4:            # scroll up = zoom in
+                    if camera_self_num is not None:
+                        camera._fp_zoom = max(0., camera._fp_zoom + DRONE_ARM_L / 4)
+                    else:
+                        camera.zoom(+1)
+                elif evt.button == 5:            # scroll down = zoom out
+                    if camera_self_num is not None:
+                        # only zoom out if already zoomed in past origin
+                        if camera._fp_zoom > 0.:
+                            camera._fp_zoom = max(0., camera._fp_zoom - DRONE_ARM_L / 4)
+                    else:
+                        camera.zoom(-1)
 
             elif evt.type == MOUSEBUTTONUP:
                 cur_button    = None
@@ -1711,8 +1909,13 @@ def main():
                 cx, cy   = pygame.mouse.get_pos()
                 dx, dy   = cx - prev_mouse_xy[0], cy - prev_mouse_xy[1]
                 prev_mouse_xy = (cx, cy)
-                if   cur_button == "rotate": camera.rotate(dx, dy)
-                elif cur_button == "pan":    camera.pan(dx, dy)
+                if cur_button == "rotate":
+                    if camera_self_num is not None:
+                        camera.first_person_rotate(dx, dy)  # FP eye-roll
+                    else:
+                        camera.rotate(dx, dy)
+                elif cur_button == "pan" and camera_self_num is None:
+                    camera.pan(dx, dy)
 
         # render 3D scene
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
@@ -1722,11 +1925,21 @@ def main():
         glLightfv(GL_LIGHT0, GL_POSITION, [0., 0., 5., 0.])
 
         # update camera tracking
-        if camera_track_num is not None and camera_track_num in drones:
-            pwb, _, _, _, _, _, _ = drones[camera_track_num].state.get()
-            camera.lookat = pwb.copy()
-
-        camera.apply()
+        if camera_self_num is not None and camera_self_num in drones:
+            # first-person mode: position eye at drone origin, look along body +X
+            pwb_fp, Rwb_fp, _, _, _, _, _ = drones[camera_self_num].state.get()
+            camera.apply_first_person(
+                pwb_fp, Rwb_fp,
+                camera._fp_pitch,
+                camera._fp_yaw,
+                camera._fp_zoom,
+            )
+        else:
+            if camera_track_num is not None and camera_track_num in drones:
+                # arcball follow mode: keep lookat on drone origin
+                pwb_tr, _, _, _, _, _, _ = drones[camera_track_num].state.get()
+                camera.lookat = pwb_tr.copy()
+            camera.apply()
             
         # collect scene labels to project after the 3-D pass
         scene_labels = []
@@ -1783,6 +1996,15 @@ def main():
         # flight controller panel (bottom-right corner)
         if show_ctrl_panel:
             draw_controller_panel(ctrl_strs, ctrl_focused, control_font, WINDOW_W, WINDOW_H, cursor_on)
+
+        # Xbox controller bindings panel (bottom-right, stacked above flight panel)
+        if show_xbox_panel:
+            _ctrl_panel_h = 0
+            if show_ctrl_panel:
+                # replicate draw_controller_panel height calculation to find stack offset
+                _lh = control_font.get_height() + 6
+                _ctrl_panel_h = _lh * 12 + 2 * 10   # 12 ROWS, PAD=10
+            draw_xbox_panel(control_font, WINDOW_W, WINDOW_H, _ctrl_panel_h)
 
         # modal dialog (centered, with dimmed background)
         if modal is not None:
