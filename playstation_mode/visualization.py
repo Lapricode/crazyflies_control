@@ -45,6 +45,7 @@ import yaml
 from collections import deque
 
 from crazyflie import DroneState, CrazyflieThread, MAX_PWM
+from playstation_controller import PlaystationController
 from xbox_controller import XboxController
 
 
@@ -59,7 +60,7 @@ GROUND_N_CELLS = 5    # half-extent: total grid spans 2*N cells each side
 GROUND_CELL_M  = 1.0  # metres per cell
 
 # Crazyflie geometry
-DRONE_ARM_L    = 0.046            # distance from body centre to each motor (Crazyflie 2.x ~= 46 mm)
+DRONE_ARM_L    = 0.046           # distance from body centre to each motor (Crazyflie 2.x ~= 46 mm)
 DRONE_BODY_YAW = -3/4 * math.pi  # assuming body_yaw0 = 0 is motor 1 at +y, motor 2 at +x, clockwise
 
 # Files
@@ -68,48 +69,63 @@ DRONES_YAML     = "config/crazyflies_config.yaml"  # configuration file for dron
 
 # Key bindings info menu (hud_font, right side of screen)
 INFO_MENU_LINES = [
-    ("  KEY BINDINGS",                             (0.10, 0.10, 0.10)),
-    ("",                                           (0.00, 0.00, 0.00)),
-    ("  LMB drag       : rotate view",             (0.20, 0.20, 0.20)),
-    ("  RMB drag       : pan view",                (0.20, 0.20, 0.20)),
-    ("  Scroll         : zoom in / out",           (0.20, 0.20, 0.20)),
-    ("  Middle-click   : reset view",              (0.20, 0.20, 0.20)),
-    ("  F11            : toggle fullscreen",       (0.20, 0.20, 0.20)),
-    ("  PgUp / PgDn    : scroll HUD",              (0.20, 0.20, 0.20)),
-    ("  I              : close this menu",         (0.20, 0.20, 0.20)),
-    ("  Escape         : quit",                    (0.20, 0.20, 0.20)),
-    ("",                                           (0.00, 0.00, 0.00)),
-    ("  Shift + W      : world frame on/off",      (0.45, 0.10, 0.10)),
-    ("  Shift + D      : drone body on/off",       (0.45, 0.10, 0.10)),
-    ("  Shift + F      : drone frame on/off",      (0.45, 0.10, 0.10)),
-    ("  Shift + L      : lighthouses on/off",      (0.45, 0.10, 0.10)),
-    ("  Shift + H      : HUD text on/off",         (0.45, 0.10, 0.10)),
-    ("  Shift + C      : console prints on/off",   (0.45, 0.10, 0.10)),
-    ("  Shift + T      : scene labels on/off",     (0.45, 0.10, 0.10)),
-    ("  Shift + X      : Xbox bindings panel",     (0.45, 0.10, 0.10)),
-    ("  Shift + 0      : show/hide all drones",    (0.45, 0.10, 0.10)),
-    ("  Shift + 1-8    : show/hide drone N",       (0.45, 0.10, 0.10)),
-    ("  Alt   + 0      : reset camera tracking",   (0.45, 0.10, 0.45)),
-    ("  Alt   + 1-8    : track drone N",           (0.45, 0.10, 0.45)),
-    ("  Ctrl+Alt + 1-8 : first-person on drone N", (0.45, 0.10, 0.45)),
-    ("",                                           (0.00, 0.00, 0.00)),
-    ("  Ctrl  + A      : add drone",               (0.10, 0.10, 0.45)),
-    ("  Ctrl  + D      : delete drone",            (0.10, 0.10, 0.45)),
-    ("  Ctrl  + R      : connect drone(s)",        (0.10, 0.10, 0.45)),
-    ("  Ctrl  + S      : save drone config",       (0.10, 0.10, 0.45)),
-    ("  Ctrl  + L      : load drone config",       (0.10, 0.10, 0.45)),
-    ("  Ctrl  + P      : change drone params",     (0.10, 0.10, 0.45)),
-    ("  Ctrl  + 1-8    : blink LED of drone N",    (0.10, 0.10, 0.45)),
-    ("",                                           (0.00, 0.00, 0.00)),
-    ("  Ctrl  + C      : flight controller panel", (0.10, 0.45, 0.10)),
-    ("    F            : takeoff",                 (0.10, 0.45, 0.10)),
-    ("    L            : land",                    (0.10, 0.45, 0.10)),
-    ("    W            : up",                      (0.10, 0.45, 0.10)),
-    ("    S            : down",                    (0.10, 0.45, 0.10)),
-    ("    A / D        : yaw ccw / cw",            (0.10, 0.45, 0.10)),
-    ("    Up / Down    : forward / backward",      (0.10, 0.45, 0.10)),
-    ("    Left / Right : slide left / right",      (0.10, 0.45, 0.10)),
+    ("  KEY BINDINGS",                                (0.10, 0.10, 0.10)),
+    ("",                                              (0.00, 0.00, 0.00)),
+    ("  LMB drag       : rotate view",                (0.20, 0.20, 0.20)),
+    ("  RMB drag       : pan view",                   (0.20, 0.20, 0.20)),
+    ("  Scroll         : zoom in / out",              (0.20, 0.20, 0.20)),
+    ("  Middle-click   : reset view",                 (0.20, 0.20, 0.20)),
+    ("  F11            : toggle fullscreen",          (0.20, 0.20, 0.20)),
+    ("  PgUp / PgDn    : scroll HUD",                 (0.20, 0.20, 0.20)),
+    ("  I              : close this menu",            (0.20, 0.20, 0.20)),
+    ("  Escape         : quit",                       (0.20, 0.20, 0.20)),
+    ("",                                              (0.00, 0.00, 0.00)),
+    ("  Shift + W      : world frame on/off",         (0.45, 0.10, 0.10)),
+    ("  Shift + D      : drone body on/off",          (0.45, 0.10, 0.10)),
+    ("  Shift + F      : drone frame on/off",         (0.45, 0.10, 0.10)),
+    ("  Shift + L      : lighthouses on/off",         (0.45, 0.10, 0.10)),
+    ("  Shift + H      : HUD text on/off",            (0.45, 0.10, 0.10)),
+    ("  Shift + C      : console prints on/off",      (0.45, 0.10, 0.10)),
+    ("  Shift + T      : scene labels on/off",        (0.45, 0.10, 0.10)),
+    ("  Shift + 0      : show/hide all drones",       (0.45, 0.10, 0.10)),
+    ("  Shift + 1-8    : show/hide drone N",          (0.45, 0.10, 0.10)),
+    ("  Alt   + 0      : reset camera tracking",      (0.45, 0.10, 0.45)),
+    ("  Alt   + 1-8    : track drone N",              (0.45, 0.10, 0.45)),
+    ("  Ctrl+Alt + 1-8 : first-person on drone N",    (0.45, 0.10, 0.45)),
+    ("",                                              (0.00, 0.00, 0.00)),
+    ("  Ctrl  + A      : add drone",                  (0.10, 0.10, 0.45)),
+    ("  Ctrl  + D      : delete drone",               (0.10, 0.10, 0.45)),
+    ("  Ctrl  + R      : connect drone(s)",           (0.10, 0.10, 0.45)),
+    ("  Ctrl  + S      : save drone config",          (0.10, 0.10, 0.45)),
+    ("  Ctrl  + L      : load drone config",          (0.10, 0.10, 0.45)),
+    ("  Ctrl  + P      : change drone params",        (0.10, 0.10, 0.45)),
+    ("  Ctrl  + 1-8    : blink LED of drone N",       (0.10, 0.10, 0.45)),
+    ("",                                              (0.00, 0.00, 0.00)),
+    ("  Ctrl  + X      : Gamepad bindings panel",     (0.10, 0.45, 0.10)),
+    ("  Ctrl  + C      : flight controller panel",    (0.10, 0.45, 0.10)),
+    ("    F            : takeoff",                    (0.10, 0.45, 0.10)),
+    ("    L            : land",                       (0.10, 0.45, 0.10)),
+    ("    W            : up",                         (0.10, 0.45, 0.10)),
+    ("    S            : down",                       (0.10, 0.45, 0.10)),
+    ("    A / D        : yaw ccw / cw",               (0.10, 0.45, 0.10)),
+    ("    Up / Down    : forward / backward",         (0.10, 0.45, 0.10)),
+    ("    Left / Right : slide left / right",         (0.10, 0.45, 0.10)),
 ]
+
+# high-level scene elements
+AXIS_DIRS   = [(1, 0, 0), (0, 1, 0), (0, 0, 1)]  # directions of the frame axes
+AXIS_COLORS = [(1, 0, 0), (0, 1, 0), (0, 0, 1)]  # X = red, Y = green, Z = blue
+
+# for flight controller panel toast messages
+_FLIGHT_CMD_LABELS = {
+    "takeoff":"Takeoff !", "land":"Land !", "up":"↑ Up", "down":"↓ Down",
+    "forward":"↑ Forward", "backward":"↓ Backward",
+    "slide_left":"← Slide Left", "slide_right":"→ Slide Right",
+    "yaw_ccw":"← Yaw CCW", "yaw_cw":"→ Yaw CW",
+}
+
+# gamepad controller
+gamepad_controller = "playstation"
 
 
 # ==============================================================================
@@ -443,8 +459,23 @@ def _arrow(direction, length, shaft_r, tip_r, tip_len, slices = 20):
 # HIGH-LEVEL SCENE ELEMENTS
 # ==============================================================================
 
-AXIS_DIRS   = [(1, 0, 0), (0, 1, 0), (0, 0, 1)]  # directions of the frame axes
-AXIS_COLORS = [(1, 0, 0), (0, 1, 0), (0, 0, 1)]   # X = red, Y = green, Z = blue
+def emphasis_mid_tanh(ratio, k = 4.0):
+    """Map [0,1] -> [0,1] with steeper slope around 0.5."""
+    return 0.5 + 0.5 * np.tanh(k * (ratio - 0.5)) / np.tanh(k / 2)
+
+
+def emphasis_mid_piecewise(ratio, y_low = 0.25, y_high = 0.75, mid_slope = 2.0):
+    """Piecewise linear mapping that expands the [y_low, y_high] interval."""
+    x_low = 0.5 + (y_low - 0.5) / mid_slope
+    x_high = 0.5 + (y_high - 0.5) / mid_slope
+    y = np.zeros_like(ratio)
+    mask_low = ratio < x_low
+    mask_mid = (ratio >= x_low) & (ratio <= x_high)
+    mask_high = ratio > x_high
+    y[mask_low] = (y_low / x_low) * ratio[mask_low]
+    y[mask_mid] = y_low + mid_slope * (ratio[mask_mid] - x_low)
+    y[mask_high] = y_high + ((1 - y_high) / (1 - x_high)) * (ratio[mask_high] - x_high)
+    return y
 
 
 def draw_frame(origin, R, axis_len, sphere_r):
@@ -554,7 +585,10 @@ def draw_quadrotor(pwb, Rwb, arm_l, body_yaw0 = math.pi / 4, control_inputs = No
     if control_inputs is not None:
         controls_max_length = arm_l
         ctrl = np.asarray(control_inputs, float)
-        control_lengths = controls_max_length * (ctrl / MAX_PWM)
+        ratio = ctrl / MAX_PWM
+        scaled_ratio = emphasis_mid_tanh(ratio, k = 4.0)
+        # scaled_ratio = emphasis_mid_piecewise(ratio, low = 0.25, high = 0.75, mid_slope = 2.0)
+        control_lengths = controls_max_length * scaled_ratio
         motor_body_pts = body_pts[:, 2:].copy()              # (3, 4) - motor cols only
         motor_body_pts[2, :] += control_lengths              # shift along body Z
         pCs = (Rwb @ motor_body_pts).T + pwb                 # (4, 3) - world frame
@@ -1203,9 +1237,9 @@ def draw_controller_panel(ctrl_strs, ctrl_focused, font, win_w, win_h, cursor_on
     _end_2d()
 
 
-def draw_xbox_panel(font, win_w, win_h, ctrl_panel_h):
+def draw_gamepad_panel(font, win_w, win_h, ctrl_panel_h):
     """
-    Render the Xbox controller bindings panel in the bottom-right corner,
+    Render the Gamepad controller bindings panel in the bottom-right corner,
     stacked above the flight controller panel when both are visible.
 
     Parameters:
@@ -1229,51 +1263,53 @@ def draw_xbox_panel(font, win_w, win_h, ctrl_panel_h):
     #   (text, colour)        - plain text row
     #   ("---", SEP_COL)      - drawn as a horizontal rule
     ROWS = [
-        ("XBOX CONTROLLER  [Shift+X]",               HDR_COL ),
-        ("---",                                      SEP_COL ),
-
+        ("GAMEPAD CONTROLLER  [Ctrl+X]",               HDR_COL ),
+        ("---",                                        SEP_COL ),
+ 
         # mode
-        ("Mode  [M/Guide btn]",                      SEC_COL ),
-        ("  manual ↔ auto",                          VAL_COL ),
-
-        ("---",                                      SEP_COL ),
-
+        ("Mode  [Back/Select btn]",                    SEC_COL ),
+        ("  manual ↔ auto",                            VAL_COL ),
+ 
+        ("---",                                        SEP_COL ),
+ 
         # sticks – shared
-        ("Sticks  (manual & auto)",                  SEC_COL ),
-        ("  L-stick ↑↓  : thrust / zdot",            KEY_COL ),
-        ("  L-stick ←→  : yaw rate  ±360°/s",        KEY_COL ),
-        ("  R-stick ←→  : roll / slide ±25°/0.5m",   KEY_COL ),
-        ("  R-stick ↑↓  : pitch / fwd  ±25°/0.5m",   KEY_COL ),
-
-        ("---",                                      SEP_COL ),
-
+        ("Sticks  (manual & auto)",                    SEC_COL ),
+        ("  L-stick ↑↓  : thrust / zdot",              KEY_COL ),
+        ("  L-stick ←→  : yaw rate  ±360°/s",          KEY_COL ),
+        ("  R-stick ←→  : roll / slide ±25°/0.5m",     KEY_COL ),
+        ("  R-stick ↑↓  : pitch / fwd  ±25°/0.5m",     KEY_COL ),
+        ("  (manual: push L-stick up to arm)",         DIM_COL ),
+ 
+        ("---",                                        SEP_COL ),
+ 
         # discrete steps – auto mode only
-        ("D-pad  (auto only)",                       SEC_COL ),
-        ("  ↑ / ↓        : altitude  ±step",         KEY_COL ),
-        ("  ← / →        : slide     ±step",         KEY_COL ),
-        ("  A (held)     : small step (0.1m / 5°)",  KEY_COL ),
-        ("  B (held)     : large step (0.5m / 15°)", KEY_COL ),
-
-        ("---",                                      SEP_COL ),
-
+        ("D-pad  (auto only)",                         SEC_COL ),
+        ("  ↑ / ↓        : altitude  ±step",           KEY_COL ),
+        ("  ← / →        : slide     ±step",           KEY_COL ),
+        ("  A (held)     : small step (0.1m / 5°)",    KEY_COL ),
+        ("  B (held)     : large step (0.5m / 15°)",   KEY_COL ),
+ 
+        ("---",                                        SEP_COL ),
+ 
         # auto mode buttons
-        ("Start  (auto only)",                       SEC_COL ),
-        ("  Start        : takeoff / land toggle",   KEY_COL ),
-
-        ("---",                                      SEP_COL ),
-
+        ("Start  (auto only)",                         SEC_COL ),
+        ("  Start        : takeoff / land toggle",     KEY_COL ),
+ 
+        ("---",                                        SEP_COL ),
+ 
         # drone selection
-        ("Drone selection  (manual & auto)",         SEC_COL ),
-        ("  LB / RB       : cycle number",           KEY_COL ),
-        ("  Select        : confirm selection",      KEY_COL ),
-        ("  (other input) : cancel selection",       DIM_COL ),
-
-        ("---",                                      SEP_COL ),
-
+        ("Drone selection  (manual & auto)",           SEC_COL ),
+        ("  LB / RB       : cycle number",             KEY_COL ),
+        ("  Select        : confirm  (or mode toggle", KEY_COL ),
+        ("    when no selection pending)",             KEY_COL ),
+        ("  (other input) : cancel selection",         DIM_COL ),
+ 
+        ("---",                                        SEP_COL ),
+ 
         # safety & misc
-        ("Safety & misc",                            SEC_COL ),
-        ("  LT (>50%)     : emergency stop",         (180, 40, 40)),
-        ("  RT (>50%)     : blink drone LED",        KEY_COL ),
+        ("Safety & misc",                              SEC_COL ),
+        ("  LT (>50%)     : emergency stop",           (180, 40, 40)),
+        ("  RT (>50%)     : blink drone LED",          KEY_COL ),
     ]
 
     # Measure panel width from the longest row text
@@ -1325,7 +1361,7 @@ def _ctrl_parse(ctrl_strs):
     try:    dx = float(ctrl_strs[1])
     except: dx = 0.5
     try:    dq = float(ctrl_strs[2])
-    except: dq = 15.0
+    except: dq = 60.0
     return dn, dx, dq
 
 
@@ -1344,6 +1380,9 @@ def _send_flight_cmd(cmd, ctrl_strs, drones):
     Forward/backward and slide movements are expressed in body frame:
     the world-frame deltas are computed from the drone's current yaw.
     """
+    if cmd is None:
+        return None
+
     dn, dx, dq = _ctrl_parse(ctrl_strs)
     targets = (list(drones.values()) if dn == 0
                else ([drones[dn]] if dn in drones else []))
@@ -1384,6 +1423,8 @@ def _send_flight_cmd(cmd, ctrl_strs, drones):
 
         elif cmd == "yaw_ccw":
             t.go_to(dyaw_deg = +dq)
+    
+    return _FLIGHT_CMD_LABELS.get(cmd, cmd)
 
 
 # allowed characters for controller panel field editing
@@ -1451,6 +1492,44 @@ def _wrap_console_line(text, font, max_width):
     return lines or [""]
 
 
+def draw_toast(text, font, win_w, win_h):
+    """
+    Render a short command-feedback message centred at the top of the screen.
+    The caller is responsible for deciding whether to call this (based on age).
+
+    Parameters:
+        text         : string to display
+        font         : pygame font
+        win_w, win_h : window dimensions in pixels
+    """
+    PAD = 12
+    surf = font.render(text, True, (20, 20, 20))
+    tw, th = surf.get_size()
+    panel_w = tw + PAD * 2
+    panel_h = th + PAD
+
+    panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+    panel.fill((240, 240, 220, 210))
+    pygame.draw.rect(panel, (80, 80, 60), (0, 0, panel_w, panel_h), 2)
+    panel.blit(surf, (PAD, PAD // 2))
+
+    pw, ph = panel.get_size()
+    raw = pygame.image.tostring(panel, "RGBA", True)
+    tex = glGenTextures(1)
+    glBindTexture(GL_TEXTURE_2D, tex)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, pw, ph, 0, GL_RGBA, GL_UNSIGNED_BYTE, raw)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+
+    ox = (win_w - pw) // 2
+    oy = 18   # small gap from top edge
+
+    _begin_2d(win_w, win_h)
+    _draw_quad_tex(tex, ox, oy, pw, ph)
+    glDeleteTextures(1, [tex])
+    _end_2d()
+
+
 def draw_console_panel(console_lines, font, win_w, win_h, cursor_on):
     """
     Render a bottom-middle console panel showing captured stdout/stderr lines.
@@ -1485,9 +1564,11 @@ def draw_console_panel(console_lines, font, win_w, win_h, cursor_on):
 
     surf.blit(font.render("CONSOLE  [Shift+C]", True, (235, 235, 235)), (PAD, PAD))
     yy = PAD + LINE_H
-    for line in rows:
-        surf.blit(font.render(line, True, (230, 230, 230)), (PAD, yy))
-        yy += LINE_H
+    try:
+        for line in rows:
+            surf.blit(font.render(line, True, (230, 230, 230)), (PAD, yy))
+            yy += LINE_H
+    except: pass
 
     sw, sh = surf.get_size()
     raw = pygame.image.tostring(surf, "RGBA", True)
@@ -1503,7 +1584,7 @@ def draw_console_panel(console_lines, font, win_w, win_h, cursor_on):
     _end_2d()
 
 
-def _build_hud_lines(drones, lighthouses, camera, show_info_menu, show_ctrl_panel, xbox):
+def _build_hud_lines(drones, lighthouses, camera, show_info_menu, show_ctrl_panel, gamepad):
     """
     Build the complete scrollable HUD line list.
 
@@ -1535,16 +1616,16 @@ def _build_hud_lines(drones, lighthouses, camera, show_info_menu, show_ctrl_pane
     lines.append((None, None))
     lines.append((ctrl_hint, (0.10, 0.50, 0.10)))
 
-    # Xbox controller status
-    if xbox is not None:
-        if xbox.is_connected():
-            xbox_col  = (0.10, 0.50, 0.50)
-            xbox_name = xbox.controller_name()
-            xbox_str  = f"Xbox : {xbox_name}  [{xbox.mode.upper()}]  CF {xbox.controlled_num}"
+    # Gamepad controller status
+    if gamepad is not None:
+        if gamepad.is_connected():
+            gamepad_col  = (0.10, 0.50, 0.50)
+            gamepad_name = gamepad.controller_name()
+            gamepad_str  = f"Gamepad : {gamepad_name}  [{gamepad.mode.upper()}]  CF {gamepad.controlled_num}"
         else:
-            xbox_col = (0.40, 0.40, 0.40)
-            xbox_str = "Xbox : not connected"
-        lines.append((xbox_str, xbox_col))
+            gamepad_col = (0.40, 0.40, 0.40)
+            gamepad_str = "Gamepad : not connected"
+        lines.append((gamepad_str, gamepad_col))
 
     if not drones:
         lines.append((None, None))
@@ -1616,7 +1697,7 @@ def main():
     # fonts
     hud_font     = pygame.font.SysFont(name = "consolas", size = 13, bold = True)
     console_font = pygame.font.SysFont(name = "consolas", size = 11, bold = True)
-    control_font = pygame.font.SysFont(name = "lucidaconsole", size = 13, bold = True)
+    control_font = pygame.font.SysFont(name = "lucidaconsole", size = 12, bold = True)
     info_font    = pygame.font.SysFont(name = "couriernew", size = 11, bold = True)
     scene_font   = pygame.font.SysFont(name = "arial", size = 14, bold = True, italic = True)
     modal_font   = pygame.font.SysFont(name = "consolas", size = 14, bold = True)
@@ -1670,18 +1751,25 @@ def main():
 
     # flight controller panel state
     show_ctrl_panel = False
-    show_xbox_panel = False
+    show_gamepad_panel = False
     ctrl_focused    = 0                       # 0 = drone, 1 = dx, 2 = dq
-    ctrl_strs       = ["0", "0.50", "15.0"]   # editable field values
+    ctrl_strs       = ["0", "0.50", "60.0"]   # editable field values
+
+    # command toast overlay state: (text: str, deadline: float) | None
+    # shown top-centre for 1 second after any flight command
+    toast = None
 
     # camera tracking state (None = manual, int = track drone N)
     camera_track_num = None
     # camera self-aware state (None = off, int = first-person on drone N)
     camera_self_num  = None
 
-    # Xbox controller (connects automatically if a joystick is detected)
-    xbox = XboxController(drones)
-    xbox.start()
+    # Gamepad controller (connects automatically if a joystick is detected)
+    if gamepad_controller == "playstation":
+        gamepad = PlaystationController(drones)
+    elif gamepad_controller == "xbox":
+        gamepad = XboxController(drones)
+    gamepad.start()
 
     print("[INFO] No drones in fleet. Use Ctrl+A to add one, then Ctrl+R to connect.")
 
@@ -1760,8 +1848,6 @@ def main():
                     show_console = not show_console
                 elif evt.key == K_t and (mods & KMOD_SHIFT):
                     show_scene_text = not show_scene_text
-                elif evt.key == K_x and (mods & KMOD_SHIFT):
-                    show_xbox_panel = not show_xbox_panel
 
                 # Shift + numkey : show/hide individual drones (0 = all)
                 elif (mods & KMOD_SHIFT) and pygame.K_0 <= evt.key <= pygame.K_9:
@@ -1844,6 +1930,10 @@ def main():
                 elif evt.key == K_c and (mods & KMOD_CTRL):
                     show_ctrl_panel = not show_ctrl_panel
 
+                # Ctrl + X : toggle gamepad controller panel
+                elif evt.key == K_x and (mods & KMOD_CTRL):
+                    show_gamepad_panel = not show_gamepad_panel
+
                 # Ctrl + numkey (1-8) : blink LED of drone N
                 elif (mods & KMOD_CTRL) and pygame.K_1 <= evt.key <= pygame.K_8:
                     n = evt.key - pygame.K_0
@@ -1855,25 +1945,26 @@ def main():
                 # flight action keys (active when controller panel is open)
                 elif show_ctrl_panel and not (mods & (KMOD_SHIFT | KMOD_CTRL)):
                     if evt.key == K_f:
-                        _send_flight_cmd("takeoff",     ctrl_strs, drones)
+                        cmd = "takeoff"
                     elif evt.key == K_l:
-                        _send_flight_cmd("land",        ctrl_strs, drones)
+                        cmd = "land"
                     elif evt.key == K_w:
-                        _send_flight_cmd("up",          ctrl_strs, drones)
+                        cmd = "up"
                     elif evt.key == K_s:
-                        _send_flight_cmd("down",        ctrl_strs, drones)
+                        cmd = "down"
                     elif evt.key == K_a:
-                        _send_flight_cmd("yaw_ccw",     ctrl_strs, drones)
+                        cmd = "yaw_ccw"
                     elif evt.key == K_d:
-                        _send_flight_cmd("yaw_cw",      ctrl_strs, drones)
+                        cmd = "yaw_cw"
                     elif evt.key == K_UP:
-                        _send_flight_cmd("forward",     ctrl_strs, drones)
+                        cmd = "forward"
                     elif evt.key == K_DOWN:
-                        _send_flight_cmd("backward",    ctrl_strs, drones)
+                        cmd = "backward"
                     elif evt.key == K_LEFT:
-                        _send_flight_cmd("slide_left",  ctrl_strs, drones)
+                        cmd = "slide_left"
                     elif evt.key == K_RIGHT:
-                        _send_flight_cmd("slide_right", ctrl_strs, drones)
+                        cmd = "slide_right"
+                    toast = (f"[KB] {_send_flight_cmd(cmd, ctrl_strs, drones)}", time.monotonic() + 1.0)
 
             elif evt.type == MOUSEBUTTONDOWN:
                 if modal is not None:
@@ -1982,7 +2073,7 @@ def main():
         # HUD overlay (left side, scrollable)
         if show_hud_text:
             hud_lines       = _build_hud_lines(drones, lighthouses, camera,
-                                               show_info_menu, show_ctrl_panel, xbox)
+                                               show_info_menu, show_ctrl_panel, gamepad)
             hud_total_lines = draw_hud_scrollable(hud_lines, hud_font, WINDOW_W, WINDOW_H, hud_scroll)
 
         # key bindings info menu (right side)
@@ -1997,23 +2088,38 @@ def main():
         if show_ctrl_panel:
             draw_controller_panel(ctrl_strs, ctrl_focused, control_font, WINDOW_W, WINDOW_H, cursor_on)
 
-        # Xbox controller bindings panel (bottom-right, stacked above flight panel)
-        if show_xbox_panel:
+        # Gamepad controller bindings panel (bottom-right, stacked above flight panel)
+        if show_gamepad_panel:
             _ctrl_panel_h = 0
             if show_ctrl_panel:
                 # replicate draw_controller_panel height calculation to find stack offset
                 _lh = control_font.get_height() + 6
                 _ctrl_panel_h = _lh * 12 + 2 * 10   # 12 ROWS, PAD=10
-            draw_xbox_panel(control_font, WINDOW_W, WINDOW_H, _ctrl_panel_h)
+            draw_gamepad_panel(control_font, WINDOW_W, WINDOW_H, _ctrl_panel_h)
 
         # modal dialog (centered, with dimmed background)
         if modal is not None:
             draw_modal(modal, modal_font, WINDOW_W, WINDOW_H, cursor_on)
 
+        # pick up gamepad last_cmd
+        if gamepad.last_cmd is not None:
+            txt, ts = gamepad.last_cmd
+            if toast is None or time.monotonic() < ts + 1.0:
+                toast = (f"[PAD] {txt}", ts + 1.0)
+            gamepad.last_cmd = None
+
+        # draw toast if still within 1-second window
+        if toast is not None:
+            txt, deadline = toast
+            if time.monotonic() < deadline:
+                draw_toast(txt, hud_font, WINDOW_W, WINDOW_H)
+            else:
+                toast = None
+
         pygame.display.flip()
 
     # cleanup
-    xbox.stop()
+    gamepad.stop()
     for entry in drones.values():
         entry.stop_connection()
     pygame.quit()

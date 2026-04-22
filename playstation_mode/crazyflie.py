@@ -179,6 +179,16 @@ class CrazyflieThread(threading.Thread):
                 self.state.connected = True
                 print(f"[CFLIB] Connected: {self.uri}")
 
+                # register disconnect callbacks so the HUD reflects loss immediately
+                # (the finally block only runs when the with-block exits, which can lag)
+                def _on_disconnect(uri):
+                    print(f"[CFLIB] Disconnected: {uri}")
+                    self.state.connected = False
+                    self._stop.set()
+
+                scf.cf.disconnected.add_callback(_on_disconnect)
+                scf.cf.connection_lost.add_callback(lambda uri, msg: _on_disconnect(uri))
+
                 # enable high-level commander
                 try:
                     scf.cf.param.set_value('commander.enHighLevel', '1')
@@ -282,7 +292,7 @@ class CrazyflieThread(threading.Thread):
     def stop(self):
         self._stop.set()
 
-    def blink_led(self, n_blinks = 3, period = 1.0):
+    def blink_led(self, n_blinks = 2, period = 0.5):
         """
         Blink the onboard LED n_blinks times over n_blinks * period seconds (1 blink/period).
         Uses the led.bitmask parameter: 255 = all on, 0 = all off.

@@ -93,7 +93,7 @@ class XboxController:
 
     Public attributes (read by visualization.py for the HUD):
         mode           : "manual" | "auto"
-        controlled_num : int – currently selected drone number (0 = all)
+        controlled_num : int - currently selected drone number (0 = all)
     """
 
     # button index constants
@@ -103,7 +103,7 @@ class XboxController:
     BTN_RB     = 5
     BTN_SELECT = 6
     BTN_START  = 7
-    BTN_MODE   = 8   # Guide button – may not be exposed on all platforms
+    BTN_MODE   = 8   # Guide button - may not be exposed on all platforms
 
     # axis index constants
     AXIS_LX    = 0   # left stick  X
@@ -136,6 +136,10 @@ class XboxController:
         # last sent setpoint (avoid flooding)
         self._last_cmd_t     = 0.0
         self._cmd_interval   = 1.0 / POLL_HZ
+
+        # last discrete command string, read by visualization.py for the toast overlay
+        # set to (text, timestamp) whenever a notable action is triggered; None otherwise
+        self.last_cmd        = None   # (str, float) | None
 
     # public interface
 
@@ -176,13 +180,23 @@ class XboxController:
         return v if abs(v) > DEADZONE else 0.0
 
     def _trigger(self, idx):
-        """Return a trigger value normalised to [0, 1] with deadzone."""
-        raw = self._axis(idx)   # raw: [-1, +1]
-        return max(0.0, (raw + 1.0) / 2.0)
+        """
+        Return a trigger value in [0, 1].
+        On Linux/SDL2 (Xbox One driver) triggers rest at -1, fully pressed = +1.
+        On Windows (xinput / Xbox 360) triggers rest at 0, fully pressed = +1.
+        max(0, raw) maps both cases correctly without division artefacts.
+        """
+        try:
+            raw = self._joystick.get_axis(idx)
+        except Exception:
+            return 0.0
+        return max(0.0, float(raw))
 
     def _btn(self, idx):
-        """Return True if the button at idx is currently pressed."""
+        """Return True if button idx is pressed; False if the index doesn't exist."""
         try:
+            if self._joystick is None or idx >= self._joystick.get_numbuttons():
+                return False
             return bool(self._joystick.get_button(idx))
         except Exception:
             return False
@@ -267,7 +281,10 @@ class XboxController:
         if not PYGAME_AVAILABLE:
             return
         try:
-            pygame.joystick.quit()
+            # Do NOT call pygame.joystick.quit() here — it tears down SDL's internal
+            # device-ID map while the main thread may be inside pygame.event.get(),
+            # causing a KeyError that propagates as a SystemError. joystick.init() is
+            # idempotent when the subsystem is already running.
             pygame.joystick.init()
             if pygame.joystick.get_count() > 0:
                 joy = pygame.joystick.Joystick(0)
@@ -308,11 +325,9 @@ class XboxController:
                     time.sleep(2.0)
                     continue
 
-            # pump pygame events (required to update joystick state on some platforms)
-            try:
-                pygame.event.pump()
-            except Exception:
-                pass
+            # NOTE: do NOT call pygame.event.pump() here — the main thread's
+            # pygame.event.get() already pumps the event queue. Calling pump()
+            # from a background thread causes a SystemError / race condition.
 
             # verify joystick is still alive
             try:
@@ -337,20 +352,11 @@ class XboxController:
             self._b_held = self._btn(self.BTN_B)
             step_m, step_deg = self._step()
 
-            # mode toggle (Mode/Guide button, rising edge)
-            if rising(self.BTN_MODE):
-                self.mode = "auto" if self.mode == "manual" else "manual"
-                print(f"[Xbox] Mode → {self.mode.upper()}")
-                # auto-mode: put previously controlled drone into auto hold
-                if self.mode == "auto":
-                    for e in self._targets():
-                        t = self._thread_for(e)
-                        if t: t.send_hover_setpoint(0., 0., 0., 0.)
-
             # L2 emergency stop (rising edge of trigger crossing 0.5)
             if lt > 0.5 and _prev_btn.get("lt_half", False) is False:
                 _prev_btn["lt_half"] = True
                 self._cmd_emergency_stop()
+                self.last_cmd = ("EMERGENCY STOP |||", time.monotonic())
                 print("[Xbox] Emergency stop!")
             elif lt <= 0.5:
                 _prev_btn["lt_half"] = False
@@ -359,6 +365,8 @@ class XboxController:
             if rt > 0.5 and _prev_btn.get("rt_half", False) is False:
                 _prev_btn["rt_half"] = True
                 self._cmd_blink()
+                self.last_cmd = ("Blink LED", time.monotonic())
+                print("[Xbox] Blink LED!")
             elif rt <= 0.5:
                 _prev_btn["rt_half"] = False
 
@@ -373,6 +381,7 @@ class XboxController:
                 nums = sorted([0] + list(self._drones.keys()))
                 idx  = nums.index(self._pending_num) if self._pending_num in nums else 0
                 self._pending_num = nums[(idx - 1) % len(nums)]
+                self.last_cmd = (f"Selecting CF {self._pending_num} (press Select to confirm)", time.monotonic())
                 print(f"[Xbox] Selecting CF {self._pending_num} (press Select to confirm)")
 
             if rising(self.BTN_RB):
@@ -381,10 +390,26 @@ class XboxController:
                 nums = sorted([0] + list(self._drones.keys()))
                 idx  = nums.index(self._pending_num) if self._pending_num in nums else 0
                 self._pending_num = nums[(idx + 1) % len(nums)]
+                self.last_cmd = (f"Selecting CF {self._pending_num} (press Select to confirm)", time.monotonic())
                 print(f"[Xbox] Selecting CF {self._pending_num} (press Select to confirm)")
 
-            if rising(self.BTN_SELECT):
-                if self._pending_num is not None:
+            if rising(self.BTN_SHARE):
+                # The Xbox Guide/Mode button (BTN_MODE = 8) is intercepted by Windows
+                # for the Game Bar and cannot be received by applications.  We use the
+                # Back/Select button (BTN_SELECT = 6) instead when it is pressed outside
+                # of a drone-selection workflow (no conflict — Select only acts on a
+                # pending number started by LB/RB).
+                if self._pending_num is None:
+                    self.mode = "auto" if self.mode == "manual" else "manual"
+                    print(f"[Xbox] Mode → {self.mode.upper()}")
+                    self.last_cmd = (f"Mode → {self.mode.upper()}", time.monotonic())
+                    # put previously controlled drone into auto hold when switching to auto
+                    if self.mode == "auto":
+                        for e in self._targets():
+                            t = self._thread_for(e)
+                            if t: t.send_hover_setpoint(0., 0., 0., 0.)
+                else:
+                    # new drone selection to control
                     # put old controlled drone into auto hover before switching
                     if self.mode == "auto":
                         for e in self._targets():
@@ -392,8 +417,8 @@ class XboxController:
                             if t: t.send_hover_setpoint(0., 0., 0., 0.)
                     self.controlled_num = self._pending_num
                     self._pending_num   = None
+                    self.last_cmd = (f"Now controlling CF {self.controlled_num} !", time.monotonic())
                     print(f"[Xbox] Now controlling CF {self.controlled_num}")
-                # else: select without pending → no-op
 
             # cancel pending selection if any other significant input is given
             if self._pending_num is not None:
@@ -402,24 +427,37 @@ class XboxController:
                            hat != (0, 0) or self._btn(self.BTN_START))
                 if any_sig:
                     self._pending_num = None
-                    print(f"[Xbox] Selection cancelled – staying on CF {self.controlled_num}")
+                    self.last_cmd = (f"Selection cancelled - staying on CF {self.controlled_num} !", time.monotonic())
+                    print(f"[Xbox] Selection cancelled - staying on CF {self.controlled_num}")
 
             # Start button: takeoff / land toggle (auto mode only)
             if rising(self.BTN_START) and self.mode == "auto":
                 if not self._airborne:
                     self._cmd_takeoff(STEP_LARGE_M)
+                    self.last_cmd = (f"Takeoff → {STEP_LARGE_M:.3f} m !", time.monotonic())
+                    print(f"[Xbox] Takeoff → {STEP_LARGE_M:.3f} m !")
                 else:
                     self._cmd_land()
+                    self.last_cmd = ("Land !", time.monotonic())
+                    print(f"[Xbox] Land !")
 
             # D-pad: discrete position / altitude steps (auto mode only)
             hat_edge = hat != _prev_hat
             _prev_hat = hat
             if hat_edge and self.mode == "auto":
                 hx, hy = hat
-                if   hy == +1: self._cmd_go_to(dz = +step_m)    # up ↑
-                elif hy == -1: self._cmd_go_to(dz = -step_m)    # down ↓
-                elif hx == +1: self._cmd_go_to(dy = -step_m)    # right →  (body +y = left, so -y = right)
-                elif hx == -1: self._cmd_go_to(dy = +step_m)    # left  ←
+                if   hy == +1:
+                    self._cmd_go_to(dz = +step_m)
+                    self.last_cmd = (f"↑ Up +{step_m:.3f} m", time.monotonic())
+                elif hy == -1:
+                    self._cmd_go_to(dz = -step_m)
+                    self.last_cmd = (f"↓ Down -{step_m:.2f} m", time.monotonic())
+                elif hx == +1:
+                    self._cmd_go_to(dy = -step_m)
+                    self.last_cmd = (f"→ Slide Right +{step_m:.2f} m", time.monotonic())
+                elif hx == -1:
+                    self._cmd_go_to(dy = +step_m)
+                    self.last_cmd = (f"← Slide Left -{step_m:.2f} m", time.monotonic())
 
             # continuous stick commands
             now = time.monotonic()
@@ -429,24 +467,51 @@ class XboxController:
                 if self.mode == "manual":
                     # left stick:  ly = thrust (up = more),  lx = yaw rate
                     # right stick: rx = roll,               ry = pitch
-                    thrust   = int(HOVER_THRUST_BASE + ly * (MAX_THRUST - HOVER_THRUST_BASE))
-                    thrust   = max(0, min(MAX_THRUST, thrust))
-                    yawrate  = -lx * MAX_YAW_RATE
-                    roll     =  rx * MAX_ATTITUDE_DEG
-                    pitch    =  ry * MAX_ATTITUDE_DEG
-                    self._cmd_setpoint_manual(roll, pitch, yawrate, thrust)
-
+                    # Only send if the left stick is pushed up (ly > 0) so that
+                    # motors stay off when the controller is at rest.
+                    if ly > DEADZONE:
+                        thrust  = int(HOVER_THRUST_BASE + ly * (MAX_THRUST - HOVER_THRUST_BASE))
+                        thrust  = max(0, min(MAX_THRUST, thrust))
+                        yawrate = -lx * MAX_YAW_RATE
+                        roll    =  rx * MAX_ATTITUDE_DEG
+                        pitch   =  ry * MAX_ATTITUDE_DEG
+                        self._cmd_setpoint_manual(roll, pitch, yawrate, thrust)
+                        self.last_cmd = (
+                            f"Manual: roll {roll:+.2f}°, pitch {pitch:+.2f}°, "
+                            f"yaw {yawrate:+.2f}°/s, thrust {thrust}",
+                            time.monotonic()
+                        )
+                        print(
+                            f"[Xbox] Manual: roll {roll:+.2f}°, pitch {pitch:+.2f}°, "
+                            f"yaw {yawrate:+.2f}°/s, thrust {thrust}"
+                        )
+                    else:
+                        # stick not raised - send zero thrust to keep motors off
+                        self._cmd_setpoint_manual(0., 0., 0., 0)
+                        
                 else:  # auto (velocity hover)
                     # left stick:  ly = zdot (up/down),  lx = yaw rate
                     # right stick: ry = forward/back,    rx = slide left/right
-                    zdot    =  ly * ZDOT_RATE
-                    yawrate = -lx * MAX_YAW_RATE
-                    vx      =  ry  # forward positive in body frame
-                    vy      = -rx  # left positive in body frame
-                    # only send if sticks are deflected (avoid overriding go_to setpoints)
-                    if abs(lx) > DEADZONE or abs(ly) > DEADZONE or \
-                       abs(rx) > DEADZONE or abs(ry) > DEADZONE:
+                    # The deadzone is large enough to absorb rest-position drift,
+                    # so we send whenever any stick is outside it.
+                    sticks_active = (abs(lx) > DEADZONE or abs(ly) > DEADZONE or
+                                    abs(rx) > DEADZONE or abs(ry) > DEADZONE)
+
+                    if sticks_active:
                         self._cmd_hover(vx, vy, yawrate, zdot)
+                        zdot    =  ly * ZDOT_RATE
+                        yawrate = -lx * MAX_YAW_RATE
+                        vx      =  ry  # forward positive in body frame
+                        vy      = -rx  # left positive in body frame
+                        self.last_cmd = (
+                            f"Auto hover: vx {vx:+.3f}, vy {vy:+.3f}, "
+                            f"zdot {zdot:+.3f}, yaw {yawrate:+.2f}°/s",
+                            time.monotonic()
+                        )
+                        print(
+                            f"[Xbox] Auto hover: vx {vx:+.3f}, vy {vy:+.3f}, "
+                            f"zdot {zdot:+.3f}, yaw {yawrate:+.2f}°/s"
+                        )
 
             # maintain loop frequency
             elapsed = time.monotonic() - t0
