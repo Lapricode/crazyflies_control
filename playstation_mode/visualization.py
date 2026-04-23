@@ -1960,8 +1960,8 @@ def main():
                     else:
                         print(f"[INFO] CF {n} not connected - cannot blink LED.")
 
-                # flight action keys (active when controller panel is open)
-                elif show_ctrl_panel and not (mods & (KMOD_SHIFT | KMOD_CTRL)):
+                # flight action keys (active when controller panel is open and only when gamepad is NOT connected)
+                elif show_ctrl_panel and not gamepad.is_connected() and not (mods & (KMOD_SHIFT | KMOD_CTRL)):
                     cmd = None
                     if evt.key == K_f:
                         cmd = "takeoff"
