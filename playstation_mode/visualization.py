@@ -1266,47 +1266,47 @@ def draw_gamepad_panel(font, win_w, win_h, ctrl_panel_h):
     ROWS = [
         ("GAMEPAD CONTROLLER  [Ctrl+X]",               HDR_COL ),
         ("---",                                        SEP_COL ),
- 
+    
         # mode
         ("Mode  [Back/Select btn]",                    SEC_COL ),
         ("  manual ↔ auto",                            VAL_COL ),
- 
+    
         ("---",                                        SEP_COL ),
- 
+    
         # sticks – shared
         ("Sticks  (manual & auto)",                    SEC_COL ),
-        ("  L-stick ↑↓  : thrust / zdot",              KEY_COL ),
-        ("  L-stick ←→  : yaw rate  ±360°/s",          KEY_COL ),
-        ("  R-stick ←→  : roll / slide ±25°/0.5m",     KEY_COL ),
-        ("  R-stick ↑↓  : pitch / fwd  ±25°/0.5m",     KEY_COL ),
+        ("  L-stick ↑↓    : thrust / zdot",            KEY_COL ),
+        ("  L-stick ←→    : yaw rate  ±360°/s",        KEY_COL ),
+        ("  R-stick ←→    : roll / slide ±25°/0.5m",   KEY_COL ),
+        ("  R-stick ↑↓    : pitch / fwd  ±25°/0.5m",   KEY_COL ),
         ("  (manual: push L-stick up to arm)",         DIM_COL ),
- 
+    
         ("---",                                        SEP_COL ),
- 
+    
         # discrete steps – auto mode only
         ("D-pad  (auto only)",                         SEC_COL ),
-        ("  ↑ / ↓        : altitude  ±step",           KEY_COL ),
-        ("  ← / →        : slide     ±step",           KEY_COL ),
-        ("  A (held)     : small step (0.1m / 5°)",    KEY_COL ),
-        ("  B (held)     : large step (0.5m / 15°)",   KEY_COL ),
- 
+        ("  ↑ / ↓         : altitude  ±step",          KEY_COL ),
+        ("  ← / →         : slide     ±step",          KEY_COL ),
+        ("  A (held)      : small step (0.1m / 5°)",   KEY_COL ),
+        ("  B (held)      : large step (0.5m / 15°)",  KEY_COL ),
+    
         ("---",                                        SEP_COL ),
- 
+    
         # auto mode buttons
         ("Start  (auto only)",                         SEC_COL ),
         ("  Start        : takeoff / land toggle",     KEY_COL ),
- 
+    
         ("---",                                        SEP_COL ),
- 
+    
         # drone selection
         ("Drone selection  (manual & auto)",           SEC_COL ),
         ("  LB / RB       : cycle number",             KEY_COL ),
         ("  Select        : confirm  (or mode toggle", KEY_COL ),
         ("    when no selection pending)",             KEY_COL ),
         ("  (other input) : cancel selection",         DIM_COL ),
- 
+    
         ("---",                                        SEP_COL ),
- 
+    
         # safety & misc
         ("Safety & misc",                              SEC_COL ),
         ("  LT (>50%)     : emergency stop",           (180, 40, 40)),
@@ -1789,6 +1789,18 @@ def main():
                 pygame.display.set_mode((WINDOW_W, WINDOW_H), DOUBLEBUF | OPENGL | RESIZABLE)
                 _on_resize(WINDOW_W, WINDOW_H)
 
+            elif evt.type == pygame.JOYDEVICEREMOVED:
+                # SDL fires this immediately when a joystick is unplugged;
+                # tell the controller object so the HUD updates right away.
+                gamepad.force_disconnect()
+
+            elif evt.type == pygame.JOYDEVICEADDED:
+                # SDL fires this when a joystick is plugged in; the controller's
+                # poll loop already re-scans every 2 s, but this wakes it sooner
+                # by simply letting _try_init_joystick() detect the new device on
+                # its next pass (no direct call needed — avoid cross-thread init).
+                pass
+
             elif evt.type == KEYDOWN:
                 # modal intercepts all keyboard input
                 if modal is not None:
@@ -1928,8 +1940,13 @@ def main():
                         print("[INFO] No drones in fleet.")
 
                 # Ctrl + C : toggle flight controller panel
+                # Disabled while gamepad is connected (use gamepad controls instead)
                 elif evt.key == K_c and (mods & KMOD_CTRL):
-                    show_ctrl_panel = not show_ctrl_panel
+                    if gamepad.is_connected():
+                        print("[INFO] Flight panel disabled while gamepad is connected.")
+                        toast = ("Gamepad connected — use controller", time.monotonic() + 2.0)
+                    else:
+                        show_ctrl_panel = not show_ctrl_panel
 
                 # Ctrl + X : toggle gamepad controller panel
                 elif evt.key == K_x and (mods & KMOD_CTRL):
@@ -1945,6 +1962,7 @@ def main():
 
                 # flight action keys (active when controller panel is open)
                 elif show_ctrl_panel and not (mods & (KMOD_SHIFT | KMOD_CTRL)):
+                    cmd = None
                     if evt.key == K_f:
                         cmd = "takeoff"
                     elif evt.key == K_l:
@@ -2009,6 +2027,15 @@ def main():
                 elif cur_button == "pan" and camera_self_num is None:
                     camera.pan(dx, dy)
 
+        # sync keyboard-panel state to gamepad so it can gate its own commands
+        gamepad.panel_open = show_ctrl_panel
+
+        # if gamepad just connected, close the keyboard flight panel automatically
+        if gamepad.is_connected() and show_ctrl_panel:
+            show_ctrl_panel = False
+            gamepad.panel_open = False
+            print("[INFO] Gamepad connected — keyboard flight panel closed.")
+            
         # render 3D scene
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         glLoadIdentity()

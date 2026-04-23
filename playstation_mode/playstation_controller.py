@@ -138,8 +138,11 @@ class PlaystationController:
         self._last_cmd_t     = 0.0
         self._cmd_interval   = 1.0 / POLL_HZ
 
+        # set to True by visualization.py when the keyboard flight panel is open;
+        # suppresses all gamepad flight commands to avoid conflicts
+        self.panel_open      = False
+
         # last discrete command string, read by visualization.py for the toast overlay
-        # set to (text, timestamp) whenever a notable action is triggered; None otherwise
         self.last_cmd        = None   # (str, float) | None
 
     # public interface
@@ -160,6 +163,16 @@ class PlaystationController:
     def is_connected(self):
         """Return True if a joystick is currently active."""
         return self._joystick is not None
+
+    def force_disconnect(self):
+        """
+        Called from the main thread when a JOYDEVICEREMOVED event is received.
+        Clears the joystick handle so the HUD immediately shows 'not connected'
+        and the poll loop re-scans on its next iteration.
+        """
+        self._joystick = None
+        self._airborne = False   # reset flight state on hardware disconnect
+        print("[PS] Joystick removed (forced disconnect).")
 
     def controller_name(self):
         """Return the SDL name string of the connected joystick, or empty string."""
@@ -356,20 +369,28 @@ class PlaystationController:
             # ── L2 emergency stop (rising edge of trigger crossing 0.5) ────────
             if lt > 0.5 and _prev_btn.get("lt_half", False) is False:
                 _prev_btn["lt_half"] = True
-                self._cmd_emergency_stop()
-                self.last_cmd = ("EMERGENCY STOP !!!", time.monotonic())
-                print("[PS] Emergency stop!")
+                if not self.panel_open:
+                    self._cmd_emergency_stop()
+                    self.last_cmd = ("EMERGENCY STOP !!!", time.monotonic())
+                    print("[PS] Emergency stop!")
             elif lt <= 0.5:
                 _prev_btn["lt_half"] = False
 
             # ── R2 blink LED (rising edge) ─────────────────────────────────────
             if rt > 0.5 and _prev_btn.get("rt_half", False) is False:
                 _prev_btn["rt_half"] = True
-                self._cmd_blink()
-                self.last_cmd = ("Blink LED", time.monotonic())
-                print("[PS] Blink LED!")
+                if not self.panel_open:
+                    self._cmd_blink()
+                    self.last_cmd = ("Blink LED", time.monotonic())
+                    print("[PS] Blink LED!")
             elif rt <= 0.5:
                 _prev_btn["rt_half"] = False
+
+            # skip all other flight commands when keyboard panel is open
+            if self.panel_open:
+                elapsed = time.monotonic() - t0
+                time.sleep(max(0., (1.0 / POLL_HZ) - elapsed))
+                continue
 
             # ── drone-selection workflow (L1 / R1 cycle, Share confirm) ────────
             lb_now = self._btn(self.BTN_L1)
@@ -473,7 +494,7 @@ class PlaystationController:
                     if ly > DEADZONE:
                         thrust  = int(HOVER_THRUST_BASE + ly * (MAX_THRUST - HOVER_THRUST_BASE))
                         thrust  = max(0, min(MAX_THRUST, thrust))
-                        yawrate = -lx * MAX_YAW_RATE
+                        yawrate =  lx * MAX_YAW_RATE
                         roll    =  rx * MAX_ATTITUDE_DEG
                         pitch   =  ry * MAX_ATTITUDE_DEG
                         self._cmd_setpoint_manual(roll, pitch, yawrate, thrust)
@@ -493,14 +514,12 @@ class PlaystationController:
                 else:  # auto (velocity hover)
                     # left stick:  ly = zdot (up/down),  lx = yaw rate
                     # right stick: ry = forward/back,    rx = slide left/right
-                    # The deadzone is large enough to absorb rest-position drift,
-                    # so we send whenever any stick is outside it.
                     sticks_active = (abs(lx) > DEADZONE or abs(ly) > DEADZONE or
                                     abs(rx) > DEADZONE or abs(ry) > DEADZONE)
 
-                    if sticks_active:
+                    if sticks_active and self._airborne:
                         zdot    =  ly * ZDOT_RATE
-                        yawrate = -lx * MAX_YAW_RATE
+                        yawrate =  lx * MAX_YAW_RATE
                         vx      =  ry  # forward positive in body frame
                         vy      = -rx  # left positive in body frame
                         self._cmd_hover(vx, vy, yawrate, zdot)
@@ -509,13 +528,10 @@ class PlaystationController:
                             f"zdot {zdot:+.3f}, yaw {yawrate:+.2f}°/s",
                             time.monotonic()
                         )
-                        print(
-                            f"[PS] Auto hover: vx {vx:+.3f}, vy {vy:+.3f}, "
-                            f"zdot {zdot:+.3f}, yaw {yawrate:+.2f}°/s"
-                        )
-                    else:
-                        # sticks not active - send zero hover command to stay hovering in current pose
+                    elif self._airborne and not sticks_active:
+                        # airborne and sticks at rest: hold position (zero velocity)
                         self._cmd_hover(0., 0., 0., 0.)
+                    # else: not airborne → send nothing; let the HLC/firmware idle
 
             # maintain loop frequency
             elapsed = time.monotonic() - t0

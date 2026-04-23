@@ -406,11 +406,26 @@ class CrazyflieThread(threading.Thread):
         hlc.go_to(dx, dy, dz, math.radians(dyaw_deg), duration, relative = True)
 
     def emergency_stop(self):
-        """Immediately cut all motors (use only in emergencies)."""
+        """
+        Immediately cut all motors.
+        Disables the high-level commander first (so it cannot override),
+        then sends repeated zero-thrust setpoints to keep motors off.
+        """
         cf = self._cf
         if cf is None:
             return
-        cf.commander.send_stop_setpoint()
+        try:
+            # disable high-level commander so it cannot override our stop command
+            cf.param.set_value('commander.enHighLevel', '0')
+        except Exception:
+            pass
+        # send stop setpoint several times to ensure it is received
+        for _ in range(10):
+            try:
+                cf.commander.send_stop_setpoint()
+            except Exception:
+                break
+            time.sleep(0.01)
 
     def send_setpoint(self, roll, pitch, yawrate, thrust):
         """
