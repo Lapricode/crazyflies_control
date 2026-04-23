@@ -25,7 +25,7 @@ except ImportError:
 # CONFIGURATION
 # ==============================================================================
 
-LOG_PERIOD_MS = 10       # sampling period in msec for log variables
+LOG_PERIOD_MS = 25       # sampling period in msec for log variables
 MAX_PWM       = 65535    # maximum motor PWM value (16-bit)
 VBAT_MIN      = 3.0      # battery voltage at 0 % (V)
 VBAT_MAX      = 4.2      # battery voltage at 100 % (V)
@@ -33,20 +33,23 @@ VBAT_MAX      = 4.2      # battery voltage at 100 % (V)
 # stabilizer.estimator parameter value → name mapping
 # source: Crazyflie firmware stabilizer_types.h
 ESTIMATOR_NAMES = {
-    0: "Any",
+    0: "Auto Select",
     1: "Complementary",
-    2: "Kalman (EKF)",
-    3: "UKF",
+    2: "Extended Kalman (EKF)",
+    3: "Unscented Kalman (UKF)",
+    4: "OutOfTree",
 }
 
 # stabilizer.controller parameter value → name mapping
 # source: Crazyflie firmware controller_autoselect.h
 CONTROLLER_NAMES = {
-    0: "Any",
+    0: "Auto Select",
     1: "PID",
     2: "Mellinger",
     3: "INDI",
     4: "Brescianini",
+    5: "Lee",
+    6: "OutOfTree",
 }
 
 
@@ -163,7 +166,7 @@ class CrazyflieThread(threading.Thread):
         super().__init__(daemon = True, name = f"cf-{uri}")
         self.uri   = uri
         self.state = state
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()
         self._cf   = None   # live Crazyflie handle, set inside run() and used by blink_led()
         self._hlc  = None   # HighLevelCommander instance, valid while connected
 
@@ -173,124 +176,168 @@ class CrazyflieThread(threading.Thread):
             return
         logging.basicConfig(level = logging.ERROR)
         cflib.crtp.init_drivers()
-        try:
-            with SyncCrazyflie(self.uri, cf = Crazyflie(rw_cache = "./cache")) as scf:
-                self._cf = scf.cf
-                self.state.connected = True
-                print(f"[CFLIB] Connected: {self.uri}")
 
-                # register disconnect callbacks so the HUD reflects loss immediately
-                # (the finally block only runs when the with-block exits, which can lag)
-                def _on_disconnect(uri):
-                    print(f"[CFLIB] Disconnected: {uri}")
-                    self.state.connected = False
-                    self._stop.set()
+        retry_delay = 0.5
 
-                scf.cf.disconnected.add_callback(_on_disconnect)
-                scf.cf.connection_lost.add_callback(lambda uri, msg: _on_disconnect(uri))
+        while not self._stop_event.is_set():
+            
+            # watchdog: detect silent link death
+            time.sleep(0.05)
+            if self.state.connected and (time.time() - last_packet_time > timeout_s):
+                print(f"[CFLIB] Link timeout (no packets) → marking disconnected")
+                self.state.connected = False
+                break   # force reconnect
 
-                # enable high-level commander
-                try:
-                    scf.cf.param.set_value('commander.enHighLevel', '1')
-                    time.sleep(0.05)
-                    self._hlc = HighLevelCommander(scf.cf)
-                    print(f"[CFLIB] High-level commander ready.")
-                except Exception as exc:
-                    print(f"[CFLIB] Could not enable high-level commander: {exc}")
+            try:
+                with SyncCrazyflie(self.uri, cf = Crazyflie(rw_cache = "./cache")) as scf:
+                    self._cf = scf.cf
+                    self.state.connected = True
+                    print(f"[CFLIB] Connected: {self.uri}")
 
-                # read stabilizer parameters once at connection time
-                try:
-                    est_id  = int(float(scf.cf.param.get_value("stabilizer.estimator")))
-                    ctrl_id = int(float(scf.cf.param.get_value("stabilizer.controller")))
-                    self.state.set_control_config(est_id, ctrl_id)
-                    print(f"[CFLIB] Estimator: {est_id} ({ESTIMATOR_NAMES.get(est_id, '?')}), "
-                          f"Controller: {ctrl_id} ({CONTROLLER_NAMES.get(ctrl_id, '?')})")
-                except Exception as exc:
-                    print(f"[CFLIB] Could not read stabilizer params: {exc}")
+                    # register disconnect callbacks so the HUD reflects loss immediately
+                    # (the finally block only runs when the with-block exits, which can lag)
+                    def _on_disconnect(uri, msg=None):
+                        print(f"[CFLIB] Disconnected: {uri}")
+                        self.state.connected = False
+                        self._cf = None
+                        self._hlc = None
 
-                # log group 1 - state estimate
-                lg_state = LogConfig(name = "StateEst", period_in_ms = LOG_PERIOD_MS)
-                lg_state.add_variable("stateEstimate.x",     "float")
-                lg_state.add_variable("stateEstimate.y",     "float")
-                lg_state.add_variable("stateEstimate.z",     "float")
-                lg_state.add_variable("stateEstimate.roll",  "float")
-                lg_state.add_variable("stateEstimate.pitch", "float")
-                lg_state.add_variable("stateEstimate.yaw",   "float")
+                    scf.cf.disconnected.add_callback(_on_disconnect)
+                    scf.cf.connection_lost.add_callback(_on_disconnect)
 
-                # log group 2 - battery
-                lg_power = LogConfig(name = "Power", period_in_ms = LOG_PERIOD_MS)
-                lg_power.add_variable("pm.vbat", "float")
+                    # enable high-level commander
+                    try:
+                        scf.cf.param.set_value('commander.enHighLevel', '1')
+                        time.sleep(0.05)
+                        self._hlc = HighLevelCommander(scf.cf)
+                        print(f"[CFLIB] High-level commander ready.")
+                    except Exception as exc:
+                        print(f"[CFLIB] Could not enable high-level commander: {exc}")
 
-                # log group 3 - motor outputs
-                lg_motors = LogConfig(name = "Motors", period_in_ms = LOG_PERIOD_MS)
-                lg_motors.add_variable("motor.m1", "uint16_t")
-                lg_motors.add_variable("motor.m2", "uint16_t")
-                lg_motors.add_variable("motor.m3", "uint16_t")
-                lg_motors.add_variable("motor.m4", "uint16_t")
+                    # read stabilizer parameters once at connection time
+                    try:
+                        est_id  = int(float(scf.cf.param.get_value("stabilizer.estimator")))
+                        ctrl_id = int(float(scf.cf.param.get_value("stabilizer.controller")))
+                        self.state.set_control_config(est_id, ctrl_id)
+                        print(f"[CFLIB] Estimator: {est_id} ({ESTIMATOR_NAMES.get(est_id, '?')}), "
+                            f"Controller: {ctrl_id} ({CONTROLLER_NAMES.get(ctrl_id, '?')})")
+                    except Exception as exc:
+                        print(f"[CFLIB] Could not read stabilizer params: {exc}")
 
-                # shared partial-state accumulator; logs from the 3 groups arrive asynchronously
-                _p    = {"x": 0., "y": 0., "z": 0., "roll": 0., "pitch": 0., "yaw": 0.,
-                         "vbat": 0., "m1": 0., "m2": 0., "m3": 0., "m4": 0.}
-                _lock = threading.Lock()
+                    # log group 1 - state estimate
+                    lg_state = LogConfig(name = "StateEst", period_in_ms = LOG_PERIOD_MS)
+                    lg_state.add_variable("stateEstimate.x",     "float")
+                    lg_state.add_variable("stateEstimate.y",     "float")
+                    lg_state.add_variable("stateEstimate.z",     "float")
+                    lg_state.add_variable("stateEstimate.roll",  "float")
+                    lg_state.add_variable("stateEstimate.pitch", "float")
+                    lg_state.add_variable("stateEstimate.yaw",   "float")
 
-                def _flush():
-                    with _lock:
-                        p = _p.copy()
-                    self.state.update(
-                        [p["x"], p["y"], p["z"]],
-                        _euler_zyx_to_R(p["roll"], p["pitch"], p["yaw"]),
-                        p["roll"], p["pitch"], p["yaw"],
-                        p["vbat"],
-                        [p["m1"], p["m2"], p["m3"], p["m4"]],
-                    )
+                    # log group 2 - battery
+                    lg_power = LogConfig(name = "Power", period_in_ms = LOG_PERIOD_MS)
+                    lg_power.add_variable("pm.vbat", "float")
 
-                def _cb_state(timestamp, data, logconf):
-                    with _lock:
-                        _p.update({"x":     data["stateEstimate.x"],
-                                   "y":     data["stateEstimate.y"],
-                                   "z":     data["stateEstimate.z"],
-                                   "roll":  data["stateEstimate.roll"],
-                                   "pitch": data["stateEstimate.pitch"],
-                                   "yaw":   data["stateEstimate.yaw"]})
-                    _flush()
+                    # log group 3 - motor outputs
+                    lg_motors = LogConfig(name = "Motors", period_in_ms = LOG_PERIOD_MS)
+                    lg_motors.add_variable("motor.m1", "uint16_t")
+                    lg_motors.add_variable("motor.m2", "uint16_t")
+                    lg_motors.add_variable("motor.m3", "uint16_t")
+                    lg_motors.add_variable("motor.m4", "uint16_t")
 
-                def _cb_power(timestamp, data, logconf):
-                    with _lock:
-                        _p["vbat"] = data["pm.vbat"]
-                    _flush()
+                    # shared partial-state accumulator; logs from the 3 groups arrive asynchronously
+                    _p    = {"x": 0., "y": 0., "z": 0., "roll": 0., "pitch": 0., "yaw": 0.,
+                            "vbat": 0., "m1": 0., "m2": 0., "m3": 0., "m4": 0.}
+                    _lock = threading.Lock()
 
-                def _cb_motors(timestamp, data, logconf):
-                    with _lock:
-                        _p.update({"m1": data["motor.m1"], "m2": data["motor.m2"],
-                                   "m3": data["motor.m3"], "m4": data["motor.m4"]})
-                    _flush()
+                    # define logging callbacks
+                    last_packet_time = time.time()
+                    timeout_s = 0.5   # adjust (0.5–1.0 sec works well)
 
-                scf.cf.log.add_config(lg_state)
-                scf.cf.log.add_config(lg_power)
-                scf.cf.log.add_config(lg_motors)
-                lg_state.data_received_cb.add_callback(_cb_state)
-                lg_power.data_received_cb.add_callback(_cb_power)
-                lg_motors.data_received_cb.add_callback(_cb_motors)
-                lg_state.start()
-                lg_power.start()
-                lg_motors.start()
+                    def _flush():
+                        with _lock:
+                            p = _p.copy()
+                        self.state.update(
+                            [p["x"], p["y"], p["z"]],
+                            _euler_zyx_to_R(p["roll"], -p["pitch"], p["yaw"]),
+                            p["roll"], p["pitch"], p["yaw"],
+                            p["vbat"],
+                            [p["m1"], p["m2"], p["m3"], p["m4"]],
+                        )
 
-                while not self._stop.is_set():
-                    time.sleep(0.05)
+                    def _cb_state(timestamp, data, logconf):
+                        nonlocal last_packet_time
+                        last_packet_time = time.time()
+                        with _lock:
+                            _p.update({"x":     data["stateEstimate.x"],
+                                        "y":     data["stateEstimate.y"],
+                                        "z":     data["stateEstimate.z"],
+                                        "roll":  data["stateEstimate.roll"],
+                                        "pitch": data["stateEstimate.pitch"],
+                                        "yaw":   data["stateEstimate.yaw"]})
+                        _flush()
 
-                lg_state.stop()
-                lg_power.stop()
-                lg_motors.stop()
+                    def _cb_power(timestamp, data, logconf):
+                        nonlocal last_packet_time
+                        last_packet_time = time.time()
+                        with _lock:
+                            _p["vbat"] = data["pm.vbat"]
+                        _flush()
 
-        except Exception as exc:
-            print(f"[CFLIB] Connection error ({self.uri}): {exc}")
-        finally:
-            self._cf  = None
-            self._hlc = None
-            self.state.connected = False
+                    def _cb_motors(timestamp, data, logconf):
+                        nonlocal last_packet_time
+                        last_packet_time = time.time()
+                        with _lock:
+                            _p.update({"m1": data["motor.m1"], "m2": data["motor.m2"],
+                                    "m3": data["motor.m3"], "m4": data["motor.m4"]})
+                        _flush()
+
+                    scf.cf.log.add_config(lg_state)
+                    scf.cf.log.add_config(lg_power)
+                    scf.cf.log.add_config(lg_motors)
+                    lg_state.data_received_cb.add_callback(_cb_state)
+                    lg_power.data_received_cb.add_callback(_cb_power)
+                    lg_motors.data_received_cb.add_callback(_cb_motors)
+                    lg_state.start()
+                    lg_power.start()
+                    lg_motors.start()
+
+                    retry_delay = 0.5  # reset backoff after a successful connection
+
+                    while not self._stop_event.is_set():
+                        time.sleep(0.05)
+
+                    # safe cleanup
+                    try:
+                        lg_state.stop()
+                    except Exception:
+                        pass
+                    try:
+                        lg_power.stop()
+                    except Exception:
+                        pass
+                    try:
+                        lg_motors.stop()
+                    except Exception:
+                        pass
+
+            except Exception as exc:
+                self.state.connected = False
+                self._cf = None
+                self._hlc = None
+
+                if self._stop_event.is_set():
+                    break
+
+                print(f"[CFLIB] Connection error ({self.uri}): {exc}")
+                time.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2.0, 5.0)
+
+        self.state.connected = False
+        self._cf  = None
+        self._hlc = None
 
     def stop(self):
-        self._stop.set()
+        self._stop_event.set()
 
     def blink_led(self, n_blinks = 2, period = 0.5):
         """

@@ -69,47 +69,48 @@ DRONES_YAML     = "config/crazyflies_config.yaml"  # configuration file for dron
 
 # Key bindings info menu (hud_font, right side of screen)
 INFO_MENU_LINES = [
-    ("  KEY BINDINGS",                                (0.10, 0.10, 0.10)),
-    ("",                                              (0.00, 0.00, 0.00)),
-    ("  LMB drag       : rotate view",                (0.20, 0.20, 0.20)),
-    ("  RMB drag       : pan view",                   (0.20, 0.20, 0.20)),
-    ("  Scroll         : zoom in / out",              (0.20, 0.20, 0.20)),
-    ("  Middle-click   : reset view",                 (0.20, 0.20, 0.20)),
-    ("  F11            : toggle fullscreen",          (0.20, 0.20, 0.20)),
-    ("  PgUp / PgDn    : scroll HUD",                 (0.20, 0.20, 0.20)),
-    ("  I              : close this menu",            (0.20, 0.20, 0.20)),
-    ("  Escape         : quit",                       (0.20, 0.20, 0.20)),
-    ("",                                              (0.00, 0.00, 0.00)),
-    ("  Shift + W      : world frame on/off",         (0.45, 0.10, 0.10)),
-    ("  Shift + D      : drone body on/off",          (0.45, 0.10, 0.10)),
-    ("  Shift + F      : drone frame on/off",         (0.45, 0.10, 0.10)),
-    ("  Shift + L      : lighthouses on/off",         (0.45, 0.10, 0.10)),
-    ("  Shift + H      : HUD text on/off",            (0.45, 0.10, 0.10)),
-    ("  Shift + C      : console prints on/off",      (0.45, 0.10, 0.10)),
-    ("  Shift + T      : scene labels on/off",        (0.45, 0.10, 0.10)),
-    ("  Shift + 0      : show/hide all drones",       (0.45, 0.10, 0.10)),
-    ("  Shift + 1-8    : show/hide drone N",          (0.45, 0.10, 0.10)),
-    ("  Alt   + 0      : reset camera tracking",      (0.45, 0.10, 0.45)),
-    ("  Alt   + 1-8    : track drone N",              (0.45, 0.10, 0.45)),
-    ("  Ctrl+Alt + 1-8 : first-person on drone N",    (0.45, 0.10, 0.45)),
-    ("",                                              (0.00, 0.00, 0.00)),
-    ("  Ctrl  + A      : add drone",                  (0.10, 0.10, 0.45)),
-    ("  Ctrl  + D      : delete drone",               (0.10, 0.10, 0.45)),
-    ("  Ctrl  + R      : connect drone(s)",           (0.10, 0.10, 0.45)),
-    ("  Ctrl  + S      : save drone config",          (0.10, 0.10, 0.45)),
-    ("  Ctrl  + L      : load drone config",          (0.10, 0.10, 0.45)),
-    ("  Ctrl  + P      : change drone params",        (0.10, 0.10, 0.45)),
-    ("  Ctrl  + 1-8    : blink LED of drone N",       (0.10, 0.10, 0.45)),
-    ("",                                              (0.00, 0.00, 0.00)),
-    ("  Ctrl  + X      : Gamepad bindings panel",     (0.10, 0.45, 0.10)),
-    ("  Ctrl  + C      : flight controller panel",    (0.10, 0.45, 0.10)),
-    ("    F            : takeoff",                    (0.10, 0.45, 0.10)),
-    ("    L            : land",                       (0.10, 0.45, 0.10)),
-    ("    W            : up",                         (0.10, 0.45, 0.10)),
-    ("    S            : down",                       (0.10, 0.45, 0.10)),
-    ("    A / D        : yaw ccw / cw",               (0.10, 0.45, 0.10)),
-    ("    Up / Down    : forward / backward",         (0.10, 0.45, 0.10)),
-    ("    Left / Right : slide left / right",         (0.10, 0.45, 0.10)),
+    ("  KEY BINDINGS",                                   (0.10, 0.10, 0.10)),
+    ("",                                                 (0.00, 0.00, 0.00)),
+    ("  LMB drag          : rotate view",                (0.20, 0.20, 0.20)),
+    ("  RMB drag          : pan view",                   (0.20, 0.20, 0.20)),
+    ("  Scroll            : zoom in/out",                (0.20, 0.20, 0.20)),
+    ("  Middle-click      : reset view",                 (0.20, 0.20, 0.20)),
+    ("  F11               : toggle fullscreen",          (0.20, 0.20, 0.20)),
+    ("  PgUp / PgDn       : scroll HUD",                 (0.20, 0.20, 0.20)),
+    ("  I                 : close this menu",            (0.20, 0.20, 0.20)),
+    ("  Escape            : quit",                       (0.20, 0.20, 0.20)),
+    ("",                                                 (0.00, 0.00, 0.00)),
+    ("  Shift + W         : world frame on/off",         (0.45, 0.10, 0.10)),
+    ("  Shift + D         : drone body on/off",          (0.45, 0.10, 0.10)),
+    ("  Shift + F         : drone frame on/off",         (0.45, 0.10, 0.10)),
+    ("  Shift + L         : lighthouses on/off",         (0.45, 0.10, 0.10)),
+    ("  Shift + H         : HUD text on/off",            (0.45, 0.10, 0.10)),
+    ("  Shift + C         : console prints on/off",      (0.45, 0.10, 0.10)),
+    ("  Shift + T         : scene labels on/off",        (0.45, 0.10, 0.10)),
+    ("  Shift + 0         : show/hide all drones",       (0.45, 0.10, 0.10)),
+    ("  Shift + 1-8       : show/hide drone N",          (0.45, 0.10, 0.10)),
+    ("  Shift + Alt + 1-8 : first-person on drone N",    (0.45, 0.10, 0.45)),
+    ("  Alt   + 1-8       : track drone N",              (0.45, 0.10, 0.45)),
+    ("  Alt   + 0         : reset camera tracking",      (0.45, 0.10, 0.45)),
+    ("",                                                 (0.00, 0.00, 0.00)),
+    ("  Ctrl  + A         : add drone",                  (0.10, 0.10, 0.45)),
+    ("  Ctrl  + D         : delete drone",               (0.10, 0.10, 0.45)),
+    ("  Ctrl  + R         : connect drone(s)",           (0.10, 0.10, 0.45)),
+    ("  Ctrl  + S         : save drone config",          (0.10, 0.10, 0.45)),
+    ("  Ctrl  + L         : load drone config",          (0.10, 0.10, 0.45)),
+    ("  Ctrl  + P         : change drone params",        (0.10, 0.10, 0.45)),
+    ("  Ctrl  + 1-8       : blink LED of drone N",       (0.10, 0.10, 0.45)),
+    ("",                                                 (0.00, 0.00, 0.00)),
+    ("  Ctrl  + Alt + 1-4 : choreographies/demos",       (0.10, 0.45, 0.45)),
+    ("  Ctrl  + X         : gamepad bindings panel",     (0.10, 0.45, 0.10)),
+    ("  Ctrl  + C         : flight controller panel",    (0.10, 0.45, 0.10)),
+    ("    F               : takeoff",                    (0.10, 0.45, 0.10)),
+    ("    L               : land",                       (0.10, 0.45, 0.10)),
+    ("    W               : up",                         (0.10, 0.45, 0.10)),
+    ("    S               : down",                       (0.10, 0.45, 0.10)),
+    ("    A / D           : yaw ccw / cw",               (0.10, 0.45, 0.10)),
+    ("    Up / Down       : forward / backward",         (0.10, 0.45, 0.10)),
+    ("    Left / Right    : slide left / right",         (0.10, 0.45, 0.10)),
 ]
 
 # high-level scene elements
@@ -464,10 +465,10 @@ def emphasis_mid_tanh(ratio, k = 4.0):
     return 0.5 + 0.5 * np.tanh(k * (ratio - 0.5)) / np.tanh(k / 2)
 
 
-def emphasis_mid_piecewise(ratio, y_low = 0.25, y_high = 0.75, mid_slope = 2.0):
+def emphasis_mid_piecewise(ratio, x_low = 0.60, x_high = 0.90, mid_slope = 3.0, norm_factor = 10.0):
     """Piecewise linear mapping that expands the [y_low, y_high] interval."""
-    x_low = 0.5 + (y_low - 0.5) / mid_slope
-    x_high = 0.5 + (y_high - 0.5) / mid_slope
+    y_low = (0.5 + (x_low - 0.5) * mid_slope) / norm_factor
+    y_high = y_low + (x_high - x_low) * mid_slope
     y = np.zeros_like(ratio)
     mask_low = ratio < x_low
     mask_mid = (ratio >= x_low) & (ratio <= x_high)
@@ -586,8 +587,8 @@ def draw_quadrotor(pwb, Rwb, arm_l, body_yaw0 = math.pi / 4, control_inputs = No
         controls_max_length = arm_l
         ctrl = np.asarray(control_inputs, float)
         ratio = ctrl / MAX_PWM
-        scaled_ratio = emphasis_mid_tanh(ratio, k = 4.0)
-        # scaled_ratio = emphasis_mid_piecewise(ratio, low = 0.25, high = 0.75, mid_slope = 2.0)
+        # scaled_ratio = emphasis_mid_tanh(ratio, k = 4.0)
+        scaled_ratio = emphasis_mid_piecewise(ratio, x_low = 0.60, x_high = 0.90, mid_slope = 3.0, norm_factor = 10.0)
         control_lengths = controls_max_length * scaled_ratio
         motor_body_pts = body_pts[:, 2:].copy()              # (3, 4) - motor cols only
         motor_body_pts[2, :] += control_lengths              # shift along body Z
@@ -1850,7 +1851,7 @@ def main():
                     show_scene_text = not show_scene_text
 
                 # Shift + numkey : show/hide individual drones (0 = all)
-                elif (mods & KMOD_SHIFT) and pygame.K_0 <= evt.key <= pygame.K_9:
+                elif (mods & KMOD_SHIFT) and not (mods & (KMOD_CTRL | KMOD_ALT)) and pygame.K_0 <= evt.key <= pygame.K_9:
                     n = evt.key - pygame.K_0
                     if n == 0:
                         # toggle all: if any are visible, hide all; otherwise show all
@@ -1861,13 +1862,13 @@ def main():
                         drones[n].visible = not drones[n].visible
 
                 # Alt + 0 : reset camera tracking (clears both track and self-aware modes)
-                elif evt.key == pygame.K_0 and (mods & KMOD_ALT):
+                elif evt.key == pygame.K_0 and (mods & KMOD_ALT) and not (mods & (KMOD_SHIFT | KMOD_CTRL)):
                     camera_track_num = None
                     camera_self_num  = None
                     print("[INFO] Camera tracking disabled.")
 
                 # Alt + numkey (1-8) : follow drone N (arcball lookat)
-                elif (mods & KMOD_ALT) and not (mods & KMOD_CTRL) and pygame.K_1 <= evt.key <= pygame.K_8:
+                elif (mods & KMOD_ALT) and not (mods & (KMOD_SHIFT | KMOD_CTRL)) and pygame.K_1 <= evt.key <= pygame.K_8:
                     n = evt.key - pygame.K_0
                     if n in drones:
                         camera_track_num = n
@@ -1876,8 +1877,8 @@ def main():
                     else:
                         print(f"[INFO] CF {n} not in fleet.")
 
-                # Ctrl + Alt + numkey (1-8) : first-person camera on drone N
-                elif (mods & KMOD_CTRL) and (mods & KMOD_ALT) and pygame.K_1 <= evt.key <= pygame.K_8:
+                # Shift + Alt + numkey (1-8) : first-person camera on drone N
+                elif (mods & KMOD_SHIFT) and (mods & KMOD_ALT) and not (mods & KMOD_CTRL) and pygame.K_1 <= evt.key <= pygame.K_8:
                     n = evt.key - pygame.K_0
                     if n in drones:
                         camera_self_num  = n

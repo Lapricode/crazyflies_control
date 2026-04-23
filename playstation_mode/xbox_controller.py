@@ -512,6 +512,9 @@ class XboxController:
                             f"[Xbox] Auto hover: vx {vx:+.3f}, vy {vy:+.3f}, "
                             f"zdot {zdot:+.3f}, yaw {yawrate:+.2f}°/s"
                         )
+                    else:
+                            # sticks not active - send zero hover command to stay hovering in current pose
+                            self._cmd_hover(0., 0., 0., 0.)
 
             # maintain loop frequency
             elapsed = time.monotonic() - t0
