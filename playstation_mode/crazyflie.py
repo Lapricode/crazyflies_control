@@ -336,6 +336,15 @@ class CrazyflieThread(threading.Thread):
         self._cf  = None
         self._hlc = None
 
+    def stop_setpoint_stream(self):
+        cf = self._cf
+        if cf is None:
+            return
+        try:
+            cf.commander.send_stop_setpoint()
+        except Exception:
+            pass
+
     def stop(self):
         self._stop_event.set()
 

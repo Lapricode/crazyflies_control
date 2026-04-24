@@ -234,6 +234,12 @@ class Camera:
         self._fp_zoom  = 1.1 * DRONE_ARM_L
 
 
+class CameraState:
+    def __init__(self):
+        self.self_num = None
+        self.track_num = None
+
+
 # ==============================================================================
 # DRONE ENTRY
 # ==============================================================================
@@ -465,17 +471,23 @@ def emphasis_mid_tanh(ratio, k = 4.0):
     return 0.5 + 0.5 * np.tanh(k * (ratio - 0.5)) / np.tanh(k / 2)
 
 
-def emphasis_mid_piecewise(ratio, x_low = 0.60, x_high = 0.90, mid_slope = 3.0, norm_factor = 10.0):
-    """Piecewise linear mapping that expands the [y_low, y_high] interval."""
+def emphasis_mid_piecewise(ratio, x_low = 0.60, x_high = 0.90, mid_slope = 0.1, y_range = DRONE_ARM_L):
+    """
+    x range is [0, 1], y range is [0, y_range]
+    Piecewise linear mapping that expands the [y_low, y_high] y interval,
+    that corresponds to [x_low, x_high] x interval.
+    """
+    x_interval = x_high - x_low
+    norm_factor = ((1 - x_interval) * (0.5 + (x_low - 0.5) * mid_slope)) / (x_low * (y_range - x_interval * mid_slope))
     y_low = (0.5 + (x_low - 0.5) * mid_slope) / norm_factor
-    y_high = y_low + (x_high - x_low) * mid_slope
+    y_high = y_low + x_interval * mid_slope
     y = np.zeros_like(ratio)
     mask_low = ratio < x_low
     mask_mid = (ratio >= x_low) & (ratio <= x_high)
     mask_high = ratio > x_high
     y[mask_low] = (y_low / x_low) * ratio[mask_low]
     y[mask_mid] = y_low + mid_slope * (ratio[mask_mid] - x_low)
-    y[mask_high] = y_high + ((1 - y_high) / (1 - x_high)) * (ratio[mask_high] - x_high)
+    y[mask_high] = y_high + ((y_range - y_high) / (1 - x_high)) * (ratio[mask_high] - x_high)
     return y
 
 
@@ -588,7 +600,7 @@ def draw_quadrotor(pwb, Rwb, arm_l, body_yaw0 = math.pi / 4, control_inputs = No
         ctrl = np.asarray(control_inputs, float)
         ratio = ctrl / MAX_PWM
         # scaled_ratio = emphasis_mid_tanh(ratio, k = 4.0)
-        scaled_ratio = emphasis_mid_piecewise(ratio, x_low = 0.60, x_high = 0.90, mid_slope = 3.0, norm_factor = 10.0)
+        scaled_ratio = emphasis_mid_piecewise(ratio, x_low = 0.60, x_high = 0.90, mid_slope = 0.1, y_range = DRONE_ARM_L)
         control_lengths = controls_max_length * scaled_ratio
         motor_body_pts = body_pts[:, 2:].copy()              # (3, 4) - motor cols only
         motor_body_pts[2, :] += control_lengths              # shift along body Z
@@ -1285,10 +1297,10 @@ def draw_gamepad_panel(font, win_w, win_h, ctrl_panel_h):
     
         # discrete steps – auto mode only
         ("D-pad  (auto only)",                         SEC_COL ),
-        ("  ↑ / ↓         : altitude  ±step",          KEY_COL ),
-        ("  ← / →         : slide     ±step",          KEY_COL ),
+        ("  ↑ / ↓         : advance  ±step",           KEY_COL ),
+        ("  ← / →         : slide    ±step",           KEY_COL ),
         ("  A (held)      : small step (0.1m / 5°)",   KEY_COL ),
-        ("  B (held)      : large step (0.5m / 15°)",  KEY_COL ),
+        ("    or else default step (0.5m / 15°)",      KEY_COL ),
     
         ("---",                                        SEP_COL ),
     
@@ -1311,6 +1323,8 @@ def draw_gamepad_panel(font, win_w, win_h, ctrl_panel_h):
         ("Safety & misc",                              SEC_COL ),
         ("  LT (>50%)     : emergency stop",           (180, 40, 40)),
         ("  RT (>50%)     : blink drone LED",          KEY_COL ),
+        ("  X             : connect to drone(s)",      KEY_COL ),
+        ("  Y             : first-person camera",      KEY_COL ),
     ]
 
     # Measure panel width from the longest row text
@@ -1729,6 +1743,7 @@ def main():
     _on_resize(WINDOW_W, WINDOW_H)
 
     camera        = Camera()
+    camera_state  = CameraState()
     clock         = pygame.time.Clock()
     prev_mouse_xy = None
     cur_button    = None
@@ -1760,14 +1775,32 @@ def main():
     # shown top-centre for 1 second after any flight command
     toast = None
 
-    # camera tracking state (None = manual, int = track drone N)
-    camera_track_num = None
-    # camera self-aware state (None = off, int = first-person on drone N)
-    camera_self_num  = None
+    # camera operations
+    camera_state.track_num = None   # camera tracking state (None = manual, int = track drone N)
+    camera_state.self_num  = None   # camera self-aware state (None = off, int = first-person on drone N)
+    def set_first_person_camera(n):
+        if n in drones:
+            camera_state.self_num  = n
+            camera_state.track_num = None
+            camera.reset_first_person()
+            print(f"[INFO] First-person camera on CF {n}.")
+        else:
+            print(f"[INFO] CF {n} not in fleet.")
+    def reset_camera_tracking():
+        camera_state.self_num  = None
+        camera_state.track_num = None
+        print("[INFO] Camera tracking disabled.")
+    def is_first_person_camera():
+        return camera_state.self_num is not None
 
     # Gamepad controller (connects automatically if a joystick is detected)
     if gamepad_controller == "playstation":
-        gamepad = PlaystationController(drones)
+        gamepad = PlaystationController(
+            drones,
+            set_first_person_camera = set_first_person_camera,
+            reset_camera_tracking = reset_camera_tracking,
+            is_first_person_camera = is_first_person_camera,
+        )
     elif gamepad_controller == "xbox":
         gamepad = XboxController(drones)
     gamepad.start()
@@ -1875,16 +1908,16 @@ def main():
 
                 # Alt + 0 : reset camera tracking (clears both track and self-aware modes)
                 elif evt.key == pygame.K_0 and (mods & KMOD_ALT) and not (mods & (KMOD_SHIFT | KMOD_CTRL)):
-                    camera_track_num = None
-                    camera_self_num  = None
+                    camera_state.track_num = None
+                    camera_state.self_num  = None
                     print("[INFO] Camera tracking disabled.")
 
                 # Alt + numkey (1-8) : follow drone N (arcball lookat)
                 elif (mods & KMOD_ALT) and not (mods & (KMOD_SHIFT | KMOD_CTRL)) and pygame.K_1 <= evt.key <= pygame.K_8:
                     n = evt.key - pygame.K_0
                     if n in drones:
-                        camera_track_num = n
-                        camera_self_num  = None
+                        camera_state.track_num = n
+                        camera_state.self_num  = None
                         print(f"[INFO] Camera tracking CF {n}.")
                     else:
                         print(f"[INFO] CF {n} not in fleet.")
@@ -1893,8 +1926,8 @@ def main():
                 elif (mods & KMOD_SHIFT) and (mods & KMOD_ALT) and not (mods & KMOD_CTRL) and pygame.K_1 <= evt.key <= pygame.K_8:
                     n = evt.key - pygame.K_0
                     if n in drones:
-                        camera_self_num  = n
-                        camera_track_num = None
+                        camera_state.self_num  = n
+                        camera_state.track_num = None
                         camera.reset_first_person()
                         print(f"[INFO] First-person camera on CF {n}.")
                     else:
@@ -1944,7 +1977,7 @@ def main():
                 elif evt.key == K_c and (mods & KMOD_CTRL):
                     if gamepad.is_connected():
                         print("[INFO] Flight panel disabled while gamepad is connected.")
-                        toast = ("Gamepad connected — use controller", time.monotonic() + 2.0)
+                        toast = ("Gamepad connected ... Use controller !", time.monotonic() + 2.0)
                     else:
                         show_ctrl_panel = not show_ctrl_panel
 
@@ -1992,19 +2025,19 @@ def main():
                     prev_mouse_xy = pygame.mouse.get_pos()
                     cur_button = "rotate"
                 elif evt.button == 2:
-                    if camera_self_num is None:
+                    if camera_state.self_num is None:
                         camera.reset_view()      # middle-click: reset view (not in FP mode)
                 elif evt.button == 3:
-                    if camera_self_num is None:  # RMB pan disabled in first-person mode
+                    if camera_state.self_num is None:  # RMB pan disabled in first-person mode
                         prev_mouse_xy = pygame.mouse.get_pos()
                         cur_button = "pan"
                 elif evt.button == 4:            # scroll up = zoom in
-                    if camera_self_num is not None:
+                    if camera_state.self_num is not None:
                         camera._fp_zoom = max(0., camera._fp_zoom + DRONE_ARM_L / 4)
                     else:
                         camera.zoom(+1)
                 elif evt.button == 5:            # scroll down = zoom out
-                    if camera_self_num is not None:
+                    if camera_state.self_num is not None:
                         # only zoom out if already zoomed in past origin
                         if camera._fp_zoom > 0.:
                             camera._fp_zoom = max(0., camera._fp_zoom - DRONE_ARM_L / 4)
@@ -2020,11 +2053,11 @@ def main():
                 dx, dy   = cx - prev_mouse_xy[0], cy - prev_mouse_xy[1]
                 prev_mouse_xy = (cx, cy)
                 if cur_button == "rotate":
-                    if camera_self_num is not None:
+                    if camera_state.self_num is not None:
                         camera.first_person_rotate(dx, dy)  # FP eye-roll
                     else:
                         camera.rotate(dx, dy)
-                elif cur_button == "pan" and camera_self_num is None:
+                elif cur_button == "pan" and camera_state.self_num is None:
                     camera.pan(dx, dy)
 
         # sync keyboard-panel state to gamepad so it can gate its own commands
@@ -2044,9 +2077,9 @@ def main():
         glLightfv(GL_LIGHT0, GL_POSITION, [0., 0., 5., 0.])
 
         # update camera tracking
-        if camera_self_num is not None and camera_self_num in drones:
+        if camera_state.self_num is not None and camera_state.self_num in drones:
             # first-person mode: position eye at drone origin, look along body +X
-            pwb_fp, Rwb_fp, _, _, _, _, _ = drones[camera_self_num].state.get()
+            pwb_fp, Rwb_fp, _, _, _, _, _ = drones[camera_state.self_num].state.get()
             camera.apply_first_person(
                 pwb_fp, Rwb_fp,
                 camera._fp_pitch,
@@ -2054,9 +2087,9 @@ def main():
                 camera._fp_zoom,
             )
         else:
-            if camera_track_num is not None and camera_track_num in drones:
+            if camera_state.track_num is not None and camera_state.track_num in drones:
                 # arcball follow mode: keep lookat on drone origin
-                pwb_tr, _, _, _, _, _, _ = drones[camera_track_num].state.get()
+                pwb_tr, _, _, _, _, _, _ = drones[camera_state.track_num].state.get()
                 camera.lookat = pwb_tr.copy()
             camera.apply()
             

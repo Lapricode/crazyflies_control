@@ -16,8 +16,8 @@ Button / axis layout assumed (PS4 DS4 / PS5 DS5 via SDL2):
     Buttons:
         0  - Cross    (x-A)
         1  - Circle   (○-B)
-        2  - Square   (□-X)   (unused by mapping)
-        3  - Triangle (△-Y)   (unused by mapping)
+        2  - Square   (□-X)
+        3  - Triangle (△-Y)
         4  - L1
         5  - R1
         6  - Share  (DS4) / Create (DS5)
@@ -74,7 +74,7 @@ STEP_SMALL_DEG    = 5.0     # degrees yaw (small step)
 ZDOT_RATE         = 0.4     # m/s per unit stick deflection
 
 # Manual mode: baseline hover thrust (send when sticks are centred)
-HOVER_THRUST_BASE = 40000   # approximate hover thrust for Crazyflie 2.x
+HOVER_THRUST_BASE = 20000   # approximate hover thrust for Crazyflie 2.x
 
 
 # ==============================================================================
@@ -98,8 +98,10 @@ class PlaystationController:
     """
 
     # button index constants  (SDL2 DS4/DS5 layout)
-    BTN_CROSS    = 0   # ×  — step-size: small
-    BTN_CIRCLE   = 1   # ○  — step-size: large
+    BTN_CROSS    = 0   # x-A  - step-size: small
+    BTN_CIRCLE   = 1   # ○-B  - step-size: large
+    BTN_SQUARE   = 2   # □-X  - reconnect with selected drones
+    BTN_TRIANGLE = 3   # △-Y  - enable first person camera
     BTN_L1       = 4
     BTN_R1       = 5
     BTN_SHARE    = 6   # Share (DS4) / Create (DS5) — mode toggle / drone select confirm
@@ -114,7 +116,7 @@ class PlaystationController:
     AXIS_L2    = 4   # L2 trigger   ← PS: index 4 (Xbox LT: index 2)
     AXIS_R2    = 5   # R2 trigger   ← PS: index 5 (same as Xbox RT)
 
-    def __init__(self, drones):
+    def __init__(self, drones, set_first_person_camera = None, reset_camera_tracking = None, is_first_person_camera = None):
         self._drones         = drones
         self.mode            = "auto"
         self.controlled_num  = 0       # 0 = all drones
@@ -145,6 +147,12 @@ class PlaystationController:
         # last discrete command string, read by visualization.py for the toast overlay
         self.last_cmd        = None   # (str, float) | None
 
+        # camera hooks
+        self._set_first_person_camera = set_first_person_camera
+        self._reset_camera_tracking   = reset_camera_tracking
+        self._is_first_person_camera  = is_first_person_camera
+        self._fp_camera_enabled       = False
+
     # public interface
 
     def start(self):
@@ -170,6 +178,7 @@ class PlaystationController:
         Clears the joystick handle so the HUD immediately shows 'not connected'
         and the poll loop re-scans on its next iteration.
         """
+        self._release_control()
         self._joystick = None
         self._airborne = False   # reset flight state on hardware disconnect
         print("[PS] Joystick removed (forced disconnect).")
@@ -185,6 +194,80 @@ class PlaystationController:
 
     # internal helpers
 
+    def _camera_target_num(self):
+        """
+        Prefer the currently selected drone.
+        If controlled_num == 0, use the first available connected/known drone.
+        """
+        if self.controlled_num != 0 and self.controlled_num in self._drones:
+            return self.controlled_num
+        nums = sorted(self._drones.keys())
+        return nums[0] if nums else None
+
+    def _camera_is_first_person(self):
+        """
+        Sync to visualization.py if a status callback was provided.
+        Otherwise fall back to the controller's local toggle state.
+        """
+        if callable(self._is_first_person_camera):
+            try:
+                return bool(self._is_first_person_camera())
+            except Exception:
+                pass
+        return self._fp_camera_enabled
+
+    def _cmd_reconnect_selected(self):
+        """
+        Reconnect the currently targeted drone(s).
+        Uses DroneEntry.start_connection() from visualization.py.
+        """
+        targets = self._targets()
+        if not targets:
+            self.last_cmd = ("Reconnect: no selected drone", time.monotonic())
+            print("[PS] Reconnect skipped: no selected drone.")
+            return
+
+        self._release_control()
+        for e in targets:
+            try:
+                e.start_connection()
+            except Exception as exc:
+                print(f"[PS] Reconnect failed for CF {e.num}: {exc}")
+
+        self._airborne = False
+        if self.controlled_num == 0:
+            self.last_cmd = ("Reconnect selected drones: all CF", time.monotonic())
+        else:
+            self.last_cmd = (f"Reconnect selected drones: CF {self.controlled_num}", time.monotonic())
+
+    def _cmd_first_person_camera(self):
+        n = self._camera_target_num()
+        if n is None:
+            self.last_cmd = ("Camera: no drone available", time.monotonic())
+            print("[PS] No drone available for first-person camera.")
+            return
+
+        if callable(self._set_first_person_camera):
+            self._set_first_person_camera(n)
+
+        self._fp_camera_enabled = True
+        self.last_cmd = (f"Camera → first-person CF {n}", time.monotonic())
+        print(f"[PS] Camera → first-person CF {n}")
+
+    def _cmd_normal_camera(self):
+        if callable(self._reset_camera_tracking):
+            self._reset_camera_tracking()
+
+        self._fp_camera_enabled = False
+        self.last_cmd = ("Camera → normal view", time.monotonic())
+        print("[PS] Camera → normal view")
+
+    def _release_control(self):
+        for e in self._targets():
+            t = self._thread_for(e)
+            if t:
+                t.stop_setpoint_stream()
+                
     def _axis(self, idx):
         """Return a deadzone-applied axis value in [-1, +1]."""
         try:
@@ -369,20 +452,18 @@ class PlaystationController:
             # ── L2 emergency stop (rising edge of trigger crossing 0.5) ────────
             if lt > 0.5 and _prev_btn.get("lt_half", False) is False:
                 _prev_btn["lt_half"] = True
-                if not self.panel_open:
-                    self._cmd_emergency_stop()
-                    self.last_cmd = ("EMERGENCY STOP !!!", time.monotonic())
-                    print("[PS] Emergency stop!")
+                self._cmd_emergency_stop()
+                self.last_cmd = ("EMERGENCY STOP !!!", time.monotonic())
+                print("[PS] Emergency stop!")
             elif lt <= 0.5:
                 _prev_btn["lt_half"] = False
 
             # ── R2 blink LED (rising edge) ─────────────────────────────────────
             if rt > 0.5 and _prev_btn.get("rt_half", False) is False:
                 _prev_btn["rt_half"] = True
-                if not self.panel_open:
-                    self._cmd_blink()
-                    self.last_cmd = ("Blink LED", time.monotonic())
-                    print("[PS] Blink LED!")
+                self._cmd_blink()
+                self.last_cmd = ("Blink LED", time.monotonic())
+                print("[PS] Blink LED!")
             elif rt <= 0.5:
                 _prev_btn["rt_half"] = False
 
@@ -403,8 +484,12 @@ class PlaystationController:
                 nums = sorted([0] + list(self._drones.keys()))
                 idx  = nums.index(self._pending_num) if self._pending_num in nums else 0
                 self._pending_num = nums[(idx - 1) % len(nums)]
-                self.last_cmd = (f"Selecting CF {self._pending_num} (press Select to confirm)", time.monotonic())
-                print(f"[PS] Selecting CF {self._pending_num} (press Select to confirm)")
+                if self._pending_num == 0:  # select all current drones
+                    self.last_cmd = (f"Selecting all CF (press Select to confirm)", time.monotonic())
+                    print(f"[PS] Selecting all CF (press Select to confirm)")
+                else:
+                    self.last_cmd = (f"Selecting CF {self._pending_num} (press Select to confirm)", time.monotonic())
+                    print(f"[PS] Selecting CF {self._pending_num} (press Select to confirm)")
 
             if rising(self.BTN_R1):
                 if self._pending_num is None:
@@ -412,8 +497,12 @@ class PlaystationController:
                 nums = sorted([0] + list(self._drones.keys()))
                 idx  = nums.index(self._pending_num) if self._pending_num in nums else 0
                 self._pending_num = nums[(idx + 1) % len(nums)]
-                self.last_cmd = (f"Selecting CF {self._pending_num} (press Select to confirm)", time.monotonic())
-                print(f"[PS] Selecting CF {self._pending_num} (press Select to confirm)")
+                if self._pending_num == 0:  # select all current drones
+                    self.last_cmd = (f"Selecting all CF (press Select to confirm)", time.monotonic())
+                    print(f"[PS] Selecting all CF (press Select to confirm)")
+                else:
+                    self.last_cmd = (f"Selecting CF {self._pending_num} (press Select to confirm)", time.monotonic())
+                    print(f"[PS] Selecting CF {self._pending_num} (press Select to confirm)")
 
             if rising(self.BTN_SHARE):
                 # ── mode toggle ────────────────────────────────────────────────────
@@ -422,11 +511,14 @@ class PlaystationController:
                 # (DS5) is used instead when pressed outside a drone-selection workflow
                 # (no conflict — Share only acts on a pending number started by L1/R1).
                 if self._pending_num is None:
+                    self._release_control()
                     self.mode = "auto" if self.mode == "manual" else "manual"
                     print(f"[PS] Mode → {self.mode.upper()}")
                     self.last_cmd = (f"Mode → {self.mode.upper()}", time.monotonic())
                     # put previously controlled drone into auto hold when switching to auto
                     if self.mode == "auto":
+                        self._airborne = False
+                        self._auto_resume_at = time.monotonic() + 0.5
                         for e in self._targets():
                             t = self._thread_for(e)
                             if t: t.send_hover_setpoint(0., 0., 0., 0.)
@@ -439,8 +531,27 @@ class PlaystationController:
                             if t: t.send_hover_setpoint(0., 0., 0., 0.)
                     self.controlled_num = self._pending_num
                     self._pending_num   = None
-                    self.last_cmd = (f"Now controlling CF {self.controlled_num} !", time.monotonic())
-                    print(f"[PS] Now controlling CF {self.controlled_num}")
+                    if self.controlled_num == 0:  # select all current drones
+                        self.last_cmd = (f"Now controlling all CF !", time.monotonic())
+                        print(f"[PS] Now controlling all CF !")
+                    else:
+                        self.last_cmd = (f"Now controlling CF {self.controlled_num} !", time.monotonic())
+                        print(f"[PS] Now controlling CF {self.controlled_num} !")
+                    self._cmd_blink()
+
+            # reconnect selected drones
+            if rising(self.BTN_SQUARE):
+                self._cmd_reconnect_selected()
+                print("[PS] Reconnect selected drones")
+
+            # toggle first-person camera
+            if rising(self.BTN_TRIANGLE):
+                if self._camera_is_first_person():
+                    self._cmd_normal_camera()
+                    print("[PS] Camera → normal view")
+                else:
+                    self._cmd_first_person_camera()
+                    print("[PS] Camera → first-person")
 
             # cancel pending selection if any other significant input is given
             if self._pending_num is not None:
@@ -454,8 +565,11 @@ class PlaystationController:
 
             # ── Options button: takeoff / land toggle (auto mode only) ─────────
             if rising(self.BTN_OPTIONS) and self.mode == "auto":
+                self._release_control()
                 if not self._airborne:
                     self._cmd_takeoff(STEP_LARGE_M)
+                    self._airborne = True
+                    self._auto_resume_at = time.monotonic() + 2.2   # or duration + margin
                     self.last_cmd = (f"Takeoff → {STEP_LARGE_M:.3f} m !", time.monotonic())
                     print(f"[PS] Takeoff → {STEP_LARGE_M:.3f} m !")
                 else:
@@ -469,11 +583,11 @@ class PlaystationController:
             if hat_edge and self.mode == "auto":
                 hx, hy = hat
                 if   hy == +1:
-                    self._cmd_go_to(dz = +step_m)
-                    self.last_cmd = (f"↑ Up +{step_m:.3f} m", time.monotonic())
+                    self._cmd_go_to(dx = +step_m)
+                    self.last_cmd = (f"↑ Forward +{step_m:.3f} m", time.monotonic())
                 elif hy == -1:
-                    self._cmd_go_to(dz = -step_m)
-                    self.last_cmd = (f"↓ Down -{step_m:.3f} m", time.monotonic())
+                    self._cmd_go_to(dx = -step_m)
+                    self.last_cmd = (f"↓ Backward -{step_m:.3f} m", time.monotonic())
                 elif hx == +1:
                     self._cmd_go_to(dy = -step_m)
                     self.last_cmd = (f"→ Slide Right +{step_m:.3f} m", time.monotonic())
@@ -512,27 +626,29 @@ class PlaystationController:
                         self._cmd_setpoint_manual(0., 0., 0., 0)
 
                 else:  # auto (velocity hover)
-                    # left stick:  ly = zdot (up/down),  lx = yaw rate
-                    # right stick: ry = forward/back,    rx = slide left/right
-                    sticks_active = (abs(lx) > DEADZONE or abs(ly) > DEADZONE or
-                                    abs(rx) > DEADZONE or abs(ry) > DEADZONE)
 
-                    if sticks_active and self._airborne:
-                        zdot    =  ly * ZDOT_RATE
-                        yawrate =  lx * MAX_YAW_RATE
-                        vx      =  ry  # forward positive in body frame
-                        vy      = -rx  # left positive in body frame
-                        self._cmd_hover(vx, vy, yawrate, zdot)
-                        self.last_cmd = (
-                            f"Auto hover: vx {vx:+.3f}, vy {vy:+.3f}, "
-                            f"zdot {zdot:+.3f}, yaw {yawrate:+.2f}°/s",
-                            time.monotonic()
-                        )
-                    elif self._airborne and not sticks_active:
-                        # airborne and sticks at rest: hold position (zero velocity)
-                        self._cmd_hover(0., 0., 0., 0.)
+                    if self._airborne and time.monotonic() >= self._auto_resume_at:
+                        # left stick:  ly = zdot (up/down),  lx = yaw rate
+                        # right stick: ry = forward/back,    rx = slide left/right
+                        sticks_active = (abs(lx) > DEADZONE or abs(ly) > DEADZONE or
+                                        abs(rx) > DEADZONE or abs(ry) > DEADZONE)
+
+                        if sticks_active:
+                            zdot    =  ly * ZDOT_RATE
+                            yawrate =  lx * MAX_YAW_RATE
+                            vx      =  ry  # forward positive in body frame
+                            vy      = -rx  # left positive in body frame
+                            self._cmd_hover(vx, vy, yawrate, zdot)
+                            self.last_cmd = (
+                                f"Auto hover: vx {vx:+.3f}, vy {vy:+.3f}, "
+                                f"zdot {zdot:+.3f}, yaw {yawrate:+.2f}°/s",
+                                time.monotonic()
+                            )
+                        else:
+                            # airborne and sticks at rest: hold position (zero velocity)
+                            self._cmd_hover(0., 0., 0., 0.)
                     # else: not airborne → send nothing; let the HLC/firmware idle
-
+                            
             # maintain loop frequency
             elapsed = time.monotonic() - t0
             sleep_t = max(0., (1.0 / POLL_HZ) - elapsed)
