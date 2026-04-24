@@ -108,7 +108,7 @@ INFO_MENU_LINES = [
     ("    L               : land",                       (0.10, 0.45, 0.10)),
     ("    W               : up",                         (0.10, 0.45, 0.10)),
     ("    S               : down",                       (0.10, 0.45, 0.10)),
-    ("    A / D           : yaw ccw / cw",               (0.10, 0.45, 0.10)),
+    ("    A / D           : turn left / right",          (0.10, 0.45, 0.10)),
     ("    Up / Down       : forward / backward",         (0.10, 0.45, 0.10)),
     ("    Left / Right    : slide left / right",         (0.10, 0.45, 0.10)),
 ]
@@ -596,12 +596,10 @@ def draw_quadrotor(pwb, Rwb, arm_l, body_yaw0 = math.pi / 4, control_inputs = No
     # proportional to PWM (0 - 65535), max length = arm_l
     # (geometry logic preserved verbatim from reference quadrotor_visualize)
     if control_inputs is not None:
-        controls_max_length = arm_l
         ctrl = np.asarray(control_inputs, float)
         ratio = ctrl / MAX_PWM
-        # scaled_ratio = emphasis_mid_tanh(ratio, k = 4.0)
-        scaled_ratio = emphasis_mid_piecewise(ratio, x_low = 0.60, x_high = 0.90, mid_slope = 0.1, y_range = DRONE_ARM_L)
-        control_lengths = controls_max_length * scaled_ratio
+        # control_lengths = emphasis_mid_tanh(ratio, k = 4.0)
+        control_lengths = emphasis_mid_piecewise(ratio, x_low = 0.60, x_high = 0.90, mid_slope = 0.1, y_range = arm_l)
         motor_body_pts = body_pts[:, 2:].copy()              # (3, 4) - motor cols only
         motor_body_pts[2, :] += control_lengths              # shift along body Z
         pCs = (Rwb @ motor_body_pts).T + pwb                 # (4, 3) - world frame
@@ -1192,7 +1190,7 @@ def draw_controller_panel(ctrl_strs, ctrl_focused, font, win_w, win_h, cursor_on
         ("─" * 34,                           None),
         ("[F] Takeoff      [L] Land",        (0.10, 0.50, 0.10)),
         ("[W] Up           [S] Down",        (0.10, 0.50, 0.10)),
-        ("[A] Yaw CCW      [D] Yaw CW",      (0.10, 0.50, 0.10)),
+        ("[A] Turn Left    [D] Turn Right",  (0.10, 0.50, 0.10)),
         ("[↑] Forward      [↓] Backward",    (0.10, 0.50, 0.10)),
         ("[←] Slide Left   [→] Slide Right", (0.10, 0.50, 0.10)),
         ("Tab: cycle fields",                (0.40, 0.40, 0.40)),
@@ -1269,62 +1267,61 @@ def draw_gamepad_panel(font, win_w, win_h, ctrl_panel_h):
     SEC_COL  = (60,  60, 140)
     KEY_COL  = (10, 120,  10)
     VAL_COL  = (20,  20,  20)
-    DIM_COL  = (110, 110, 110)
+    DIM_COL  = (100, 100, 100)
     SEP_COL  = (120, 120, 120)
 
     # Each row is either:
     #   (text, colour)        - plain text row
     #   ("---", SEP_COL)      - drawn as a horizontal rule
     ROWS = [
-        ("GAMEPAD CONTROLLER  [Ctrl+X]",               HDR_COL ),
-        ("---",                                        SEP_COL ),
-    
+        ("GAMEPAD CONTROLLER  [Ctrl+X]",                  HDR_COL ),
+        ("---",                                           SEP_COL ),
+
         # mode
-        ("Mode  [Back/Select btn]",                    SEC_COL ),
-        ("  manual ↔ auto",                            VAL_COL ),
-    
-        ("---",                                        SEP_COL ),
-    
-        # sticks – shared
-        ("Sticks  (manual & auto)",                    SEC_COL ),
-        ("  L-stick ↑↓    : thrust / zdot",            KEY_COL ),
-        ("  L-stick ←→    : yaw rate  ±360°/s",        KEY_COL ),
-        ("  R-stick ←→    : roll / slide ±25°/0.5m",   KEY_COL ),
-        ("  R-stick ↑↓    : pitch / fwd  ±25°/0.5m",   KEY_COL ),
-        ("  (manual: push L-stick up to arm)",         DIM_COL ),
-    
-        ("---",                                        SEP_COL ),
-    
-        # discrete steps – auto mode only
-        ("D-pad  (auto only)",                         SEC_COL ),
-        ("  ↑ / ↓         : advance  ±step",           KEY_COL ),
-        ("  ← / →         : slide    ±step",           KEY_COL ),
-        ("  A (held)      : small step (0.1m / 5°)",   KEY_COL ),
-        ("    or else default step (0.5m / 15°)",      KEY_COL ),
-    
-        ("---",                                        SEP_COL ),
-    
-        # auto mode buttons
-        ("Start  (auto only)",                         SEC_COL ),
-        ("  Start        : takeoff / land toggle",     KEY_COL ),
-    
-        ("---",                                        SEP_COL ),
-    
+        ("Mode",                                          SEC_COL ),
+        ("  auto (High-Level Commander)",                 VAL_COL ),
+
+        ("---",                                           SEP_COL ),
+
+        # flight
+        ("Start flight",                                  SEC_COL ),
+        ("  Start           : takeoff / land",            KEY_COL ),
+
+        ("---",                                           SEP_COL ),
+
+        # sticks
+        ("Sticks",                                        SEC_COL ),
+        ("  L-stick ↑↓      : forward / backward",        KEY_COL ),
+        ("  L-stick ←→      : slide left / right",        KEY_COL ),
+        ("  R-stick ↑↓      : forward / backward",        KEY_COL ),
+        ("  R-stick ←→      : slide left / right",        KEY_COL ),
+ 
+        ("---",                                           SEP_COL ),
+ 
+        # D-pad
+        ("D-pad",                                         SEC_COL ),
+        ("  ↑ / ↓           : up / down",                 KEY_COL ),
+        ("  ← / →           : turn left / right",         KEY_COL ),
+        ("  A-Cross (hold)  : small step (0.1m / 15°)",   KEY_COL ),
+        ("  B-Circle (hold) : large step (0.5m / 90°)",   KEY_COL ),
+        ("  (default step)  : normal step (0.25m / 45°)", DIM_COL ),
+
+        ("---",                                           SEP_COL ),
+
         # drone selection
-        ("Drone selection  (manual & auto)",           SEC_COL ),
-        ("  LB / RB       : cycle number",             KEY_COL ),
-        ("  Select        : confirm  (or mode toggle", KEY_COL ),
-        ("    when no selection pending)",             KEY_COL ),
-        ("  (other input) : cancel selection",         DIM_COL ),
-    
-        ("---",                                        SEP_COL ),
-    
+        ("Drone selection",                               SEC_COL ),
+        ("  L1 / R1        : cycle number",               KEY_COL ),
+        ("  Select-Share   : confirm selection",          KEY_COL ),
+        ("  (other input)  : cancel selection",           DIM_COL ),
+ 
+        ("---",                                           SEP_COL ),
+ 
         # safety & misc
-        ("Safety & misc",                              SEC_COL ),
-        ("  LT (>50%)     : emergency stop",           (180, 40, 40)),
-        ("  RT (>50%)     : blink drone LED",          KEY_COL ),
-        ("  X             : connect to drone(s)",      KEY_COL ),
-        ("  Y             : first-person camera",      KEY_COL ),
+        ("Additional",                                    SEC_COL ),
+        ("  L2 (hold)      : turbo (increase speed)",     KEY_COL ),
+        ("  R2             : blink drone LED",            KEY_COL ),
+        ("  X-Square       : connect to drone(s)",        KEY_COL ),
+        ("  Y-Triangle     : first-person camera",        KEY_COL ),
     ]
 
     # Measure panel width from the longest row text

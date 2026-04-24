@@ -3,7 +3,6 @@
 Crazyflie connection, state estimation, and telemetry.
 """
 
-
 import math
 import time
 import threading
@@ -62,9 +61,15 @@ def _euler_zyx_to_R(roll_deg, pitch_deg, yaw_deg):
     ZYX Euler → body rotation matrix wrt world
     """
     r, p, y = map(math.radians, [roll_deg, pitch_deg, yaw_deg])
-    Rz = np.array([[math.cos(y), -math.sin(y), 0], [math.sin(y), math.cos(y), 0], [0, 0, 1]])
-    Ry = np.array([[math.cos(p), 0, math.sin(p)], [0, 1, 0], [-math.sin(p), 0, math.cos(p)]])
-    Rx = np.array([[1, 0, 0], [0, math.cos(r), -math.sin(r)], [0, math.sin(r), math.cos(r)]])
+    Rz = np.array([[math.cos(y), -math.sin(y), 0],
+                   [math.sin(y),  math.cos(y), 0],
+                   [0, 0, 1]])
+    Ry = np.array([[ math.cos(p), 0, math.sin(p)],
+                   [0, 1, 0],
+                   [-math.sin(p), 0, math.cos(p)]])
+    Rx = np.array([[1, 0, 0],
+                   [0, math.cos(r), -math.sin(r)],
+                   [0, math.sin(r),  math.cos(r)]])
     return Rz @ Ry @ Rx
 
 
@@ -87,7 +92,7 @@ class DroneState:
         - connected    : boolean indication for the connection state
     """
 
-    def __init__(self, default_pos = None):
+    def __init__(self, default_pos=None):
         self._lock         = threading.Lock()
         self.pwb           = np.asarray(default_pos, float) if default_pos is not None else np.zeros(3)
         self.Rwb           = np.eye(3)
@@ -163,39 +168,50 @@ class CrazyflieThread(threading.Thread):
     """
 
     def __init__(self, uri, state: DroneState):
-        super().__init__(daemon = True, name = f"cf-{uri}")
+        super().__init__(daemon=True, name=f"cf-{uri}")
         self.uri   = uri
         self.state = state
         self._stop_event = threading.Event()
-        self._cf   = None   # live Crazyflie handle, set inside run() and used by blink_led()
-        self._hlc  = None   # HighLevelCommander instance, valid while connected
+        self._cf  = None   # live Crazyflie handle, set inside run() and used by blink_led()
+        self._hlc = None   # HighLevelCommander instance, valid while connected
+
+    def _ensure_hlc(self):
+        """
+        Ensure commander.enHighLevel is enabled and a HighLevelCommander exists.
+        Returns the HLC instance, or None on failure.
+        """
+        cf = self._cf
+        if cf is None or not self.state.connected:
+            return None
+
+        try:
+            cf.param.set_value("commander.enHighLevel", "1")
+            time.sleep(0.05)
+            if self._hlc is None:
+                self._hlc = HighLevelCommander(cf)
+            return self._hlc
+        except Exception as exc:
+            print(f"[CFLIB] Could not enable HLC ({self.uri}): {exc}")
+            return None
 
     def run(self):
         if not CFLIB_AVAILABLE:
             print("[CFLIB] cflib not installed - running without drone.")
             return
-        logging.basicConfig(level = logging.ERROR)
+
+        logging.basicConfig(level=logging.ERROR)
         cflib.crtp.init_drivers()
 
         retry_delay = 0.5
 
         while not self._stop_event.is_set():
-            
-            # watchdog: detect silent link death
-            time.sleep(0.05)
-            if self.state.connected and (time.time() - last_packet_time > timeout_s):
-                print(f"[CFLIB] Link timeout (no packets) → marking disconnected")
-                self.state.connected = False
-                break   # force reconnect
-
             try:
-                with SyncCrazyflie(self.uri, cf = Crazyflie(rw_cache = "./cache")) as scf:
+                with SyncCrazyflie(self.uri, cf=Crazyflie(rw_cache="./cache")) as scf:
                     self._cf = scf.cf
                     self.state.connected = True
                     print(f"[CFLIB] Connected: {self.uri}")
 
-                    # register disconnect callbacks so the HUD reflects loss immediately
-                    # (the finally block only runs when the with-block exits, which can lag)
+                    # Keep the HUD in sync if the link drops.
                     def _on_disconnect(uri, msg=None):
                         print(f"[CFLIB] Disconnected: {uri}")
                         self.state.connected = False
@@ -205,53 +221,55 @@ class CrazyflieThread(threading.Thread):
                     scf.cf.disconnected.add_callback(_on_disconnect)
                     scf.cf.connection_lost.add_callback(_on_disconnect)
 
-                    # enable high-level commander
+                    # Enable high-level commander once at connection time.
                     try:
-                        scf.cf.param.set_value('commander.enHighLevel', '1')
+                        scf.cf.param.set_value("commander.enHighLevel", "1")
                         time.sleep(0.05)
                         self._hlc = HighLevelCommander(scf.cf)
-                        print(f"[CFLIB] High-level commander ready.")
+                        print("[CFLIB] High-level commander ready.")
                     except Exception as exc:
                         print(f"[CFLIB] Could not enable high-level commander: {exc}")
+                        self._hlc = None
 
-                    # read stabilizer parameters once at connection time
+                    # Read stabilizer parameters once at connection time.
                     try:
-                        est_id  = int(float(scf.cf.param.get_value("stabilizer.estimator")))
+                        est_id = int(float(scf.cf.param.get_value("stabilizer.estimator")))
                         ctrl_id = int(float(scf.cf.param.get_value("stabilizer.controller")))
                         self.state.set_control_config(est_id, ctrl_id)
-                        print(f"[CFLIB] Estimator: {est_id} ({ESTIMATOR_NAMES.get(est_id, '?')}), "
-                            f"Controller: {ctrl_id} ({CONTROLLER_NAMES.get(ctrl_id, '?')})")
+                        print(
+                            f"[CFLIB] Estimator: {est_id} ({ESTIMATOR_NAMES.get(est_id, '?')}), "
+                            f"Controller: {ctrl_id} ({CONTROLLER_NAMES.get(ctrl_id, '?')})"
+                        )
                     except Exception as exc:
                         print(f"[CFLIB] Could not read stabilizer params: {exc}")
 
-                    # log group 1 - state estimate
-                    lg_state = LogConfig(name = "StateEst", period_in_ms = LOG_PERIOD_MS)
-                    lg_state.add_variable("stateEstimate.x",     "float")
-                    lg_state.add_variable("stateEstimate.y",     "float")
-                    lg_state.add_variable("stateEstimate.z",     "float")
-                    lg_state.add_variable("stateEstimate.roll",  "float")
+                    # Log group 1 - state estimate
+                    lg_state = LogConfig(name="StateEst", period_in_ms=LOG_PERIOD_MS)
+                    lg_state.add_variable("stateEstimate.x", "float")
+                    lg_state.add_variable("stateEstimate.y", "float")
+                    lg_state.add_variable("stateEstimate.z", "float")
+                    lg_state.add_variable("stateEstimate.roll", "float")
                     lg_state.add_variable("stateEstimate.pitch", "float")
-                    lg_state.add_variable("stateEstimate.yaw",   "float")
+                    lg_state.add_variable("stateEstimate.yaw", "float")
 
-                    # log group 2 - battery
-                    lg_power = LogConfig(name = "Power", period_in_ms = LOG_PERIOD_MS)
+                    # Log group 2 - battery
+                    lg_power = LogConfig(name="Power", period_in_ms=LOG_PERIOD_MS)
                     lg_power.add_variable("pm.vbat", "float")
 
-                    # log group 3 - motor outputs
-                    lg_motors = LogConfig(name = "Motors", period_in_ms = LOG_PERIOD_MS)
+                    # Log group 3 - motor outputs
+                    lg_motors = LogConfig(name="Motors", period_in_ms=LOG_PERIOD_MS)
                     lg_motors.add_variable("motor.m1", "uint16_t")
                     lg_motors.add_variable("motor.m2", "uint16_t")
                     lg_motors.add_variable("motor.m3", "uint16_t")
                     lg_motors.add_variable("motor.m4", "uint16_t")
 
-                    # shared partial-state accumulator; logs from the 3 groups arrive asynchronously
-                    _p    = {"x": 0., "y": 0., "z": 0., "roll": 0., "pitch": 0., "yaw": 0.,
-                            "vbat": 0., "m1": 0., "m2": 0., "m3": 0., "m4": 0.}
+                    # Shared partial-state accumulator; logs from the 3 groups arrive asynchronously.
+                    _p = {"x": 0., "y": 0., "z": 0., "roll": 0., "pitch": 0., "yaw": 0.,
+                          "vbat": 0., "m1": 0., "m2": 0., "m3": 0., "m4": 0.}
                     _lock = threading.Lock()
 
-                    # define logging callbacks
                     last_packet_time = time.time()
-                    timeout_s = 0.5   # adjust (0.5–1.0 sec works well)
+                    timeout_s = 0.5
 
                     def _flush():
                         with _lock:
@@ -268,12 +286,14 @@ class CrazyflieThread(threading.Thread):
                         nonlocal last_packet_time
                         last_packet_time = time.time()
                         with _lock:
-                            _p.update({"x":     data["stateEstimate.x"],
-                                        "y":     data["stateEstimate.y"],
-                                        "z":     data["stateEstimate.z"],
-                                        "roll":  data["stateEstimate.roll"],
-                                        "pitch": data["stateEstimate.pitch"],
-                                        "yaw":   data["stateEstimate.yaw"]})
+                            _p.update({
+                                "x": data["stateEstimate.x"],
+                                "y": data["stateEstimate.y"],
+                                "z": data["stateEstimate.z"],
+                                "roll": data["stateEstimate.roll"],
+                                "pitch": data["stateEstimate.pitch"],
+                                "yaw": data["stateEstimate.yaw"],
+                            })
                         _flush()
 
                     def _cb_power(timestamp, data, logconf):
@@ -287,8 +307,12 @@ class CrazyflieThread(threading.Thread):
                         nonlocal last_packet_time
                         last_packet_time = time.time()
                         with _lock:
-                            _p.update({"m1": data["motor.m1"], "m2": data["motor.m2"],
-                                    "m3": data["motor.m3"], "m4": data["motor.m4"]})
+                            _p.update({
+                                "m1": data["motor.m1"],
+                                "m2": data["motor.m2"],
+                                "m3": data["motor.m3"],
+                                "m4": data["motor.m4"],
+                            })
                         _flush()
 
                     scf.cf.log.add_config(lg_state)
@@ -297,16 +321,20 @@ class CrazyflieThread(threading.Thread):
                     lg_state.data_received_cb.add_callback(_cb_state)
                     lg_power.data_received_cb.add_callback(_cb_power)
                     lg_motors.data_received_cb.add_callback(_cb_motors)
+
                     lg_state.start()
                     lg_power.start()
                     lg_motors.start()
 
-                    retry_delay = 0.5  # reset backoff after a successful connection
+                    retry_delay = 0.5
 
                     while not self._stop_event.is_set():
+                        if self.state.connected and (time.time() - last_packet_time > timeout_s):
+                            print(f"[CFLIB] Link timeout (no packets) → marking disconnected")
+                            self.state.connected = False
+                            break
                         time.sleep(0.05)
 
-                    # safe cleanup
                     try:
                         lg_state.stop()
                     except Exception:
@@ -333,22 +361,13 @@ class CrazyflieThread(threading.Thread):
                 retry_delay = min(retry_delay * 2.0, 5.0)
 
         self.state.connected = False
-        self._cf  = None
+        self._cf = None
         self._hlc = None
-
-    def stop_setpoint_stream(self):
-        cf = self._cf
-        if cf is None:
-            return
-        try:
-            cf.commander.send_stop_setpoint()
-        except Exception:
-            pass
 
     def stop(self):
         self._stop_event.set()
 
-    def blink_led(self, n_blinks = 2, period = 0.5):
+    def blink_led(self, n_blinks=2, period=0.5):
         """
         Blink the onboard LED n_blinks times over n_blinks * period seconds (1 blink/period).
         Uses the led.bitmask parameter: 255 = all on, 0 = all off.
@@ -369,38 +388,38 @@ class CrazyflieThread(threading.Thread):
                     print(f"[CFLIB] LED blink error: {exc}")
                     break
 
-        threading.Thread(target = _do_blink, daemon = True, name = "led-blink").start()
+        threading.Thread(target=_do_blink, daemon=True, name="led-blink").start()
 
     # --------------------------------------------------------------------------
-    # High-level flight commands (require commander.enHighLevel = 1)
+    # High-level flight commands
     # --------------------------------------------------------------------------
 
-    def takeoff(self, height = 0.5, duration = 2.0):
+    def takeoff(self, height=0.5, duration=2.0):
         """
         Take off to the specified height above the current position.
         Parameters:
             height   : target height in metres above ground
             duration : time in seconds to complete the manoeuvre
         """
-        hlc = self._hlc
+        hlc = self._ensure_hlc()
         if hlc is None:
             print(f"[CFLIB] High-level commander not ready ({self.uri})")
             return
         hlc.takeoff(height, duration)
 
-    def land(self, duration = 2.0):
+    def land(self, duration=2.0):
         """
         Land the drone.
         Parameters:
             duration : time in seconds to complete the descent
         """
-        hlc = self._hlc
+        hlc = self._ensure_hlc()
         if hlc is None:
             print(f"[CFLIB] High-level commander not ready ({self.uri})")
             return
         hlc.land(0.0, duration)
 
-    def go_to(self, dx = 0., dy = 0., dz = 0., dyaw_deg = 0., duration = 1.5):
+    def go_to(self, dx=0., dy=0., dz=0., dyaw_deg=0., duration=2.0):
         """
         Move relative to the current position setpoint in world frame.
         Parameters:
@@ -408,57 +427,8 @@ class CrazyflieThread(threading.Thread):
             dyaw_deg   : yaw rotation offset in degrees
             duration   : time in seconds to complete the move
         """
-        hlc = self._hlc
+        hlc = self._ensure_hlc()
         if hlc is None:
             print(f"[CFLIB] High-level commander not ready ({self.uri})")
             return
-        hlc.go_to(dx, dy, dz, math.radians(dyaw_deg), duration, relative = True)
-
-    def emergency_stop(self):
-        """
-        Immediately cut all motors.
-        Disables the high-level commander first (so it cannot override),
-        then sends repeated zero-thrust setpoints to keep motors off.
-        """
-        cf = self._cf
-        if cf is None:
-            return
-        try:
-            # disable high-level commander so it cannot override our stop command
-            cf.param.set_value('commander.enHighLevel', '0')
-        except Exception:
-            pass
-        # send stop setpoint several times to ensure it is received
-        for _ in range(10):
-            try:
-                cf.commander.send_stop_setpoint()
-            except Exception:
-                break
-            time.sleep(0.01)
-
-    def send_setpoint(self, roll, pitch, yawrate, thrust):
-        """
-        Send a low-level attitude setpoint (manual flight mode).
-        Parameters:
-            roll     : roll angle in degrees  (-180 … +180)
-            pitch    : pitch angle in degrees (-180 … +180)
-            yawrate  : yaw rate in degrees/s  (-400 … +400)
-            thrust   : motor thrust           (0 … 65535)
-        """
-        cf = self._cf
-        if cf is None:
-            return
-        cf.commander.send_setpoint(roll, pitch, yawrate, int(thrust))
-
-    def send_hover_setpoint(self, vx, vy, yawrate, zdot):
-        """
-        Send a velocity hover setpoint (auto height-hold mode).
-        Parameters:
-            vx, vy  : horizontal velocity in m/s (body-frame forward/left)
-            yawrate : yaw rate in degrees/s
-            zdot    : vertical velocity in m/s
-        """
-        cf = self._cf
-        if cf is None:
-            return
-        cf.commander.send_hover_setpoint(vx, vy, yawrate, zdot)
+        hlc.go_to(dx, dy, dz, math.radians(dyaw_deg), duration, relative=True)
