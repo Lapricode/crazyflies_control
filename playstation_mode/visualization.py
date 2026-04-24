@@ -1045,7 +1045,6 @@ def _make_param_modal(drone_nums):
         title  = "Change Drone Parameters",
         fields = [
             TextField("Drone number", "", TextField.DIGITS, f"available: {nums_str}"),
-            TextField("LED value (0-255)", "", TextField.DIGITS, "led.bitmask"),
             TextField("Controller", "", TextField.DIGITS, "stabilizer.controller"),
             TextField("Estimator", "", TextField.DIGITS, "stabilizer.estimator"),
         ],
@@ -1126,18 +1125,6 @@ def _handle_modal_confirm(modal, drones):
         if cf is None:
             print(f"[WARN] CF {n} connection handle unavailable.")
             return
-
-        # LED value
-        if led_str:
-            try:
-                led_val = int(led_str)
-                if 0 <= led_val <= 255:
-                    cf.param.set_value("led.bitmask", str(led_val))
-                    print(f"[PARAM] CF {n}: led.bitmask = {led_val}")
-                else:
-                    print(f"[WARN] LED value must be 0-255.")
-            except ValueError:
-                print(f"[WARN] Invalid LED value: {led_str}")
 
         # Controller
         if ctrl_str:
@@ -1674,9 +1661,9 @@ def _build_hud_lines(drones, lighthouses, camera, show_info_menu, show_ctrl_pane
         lines.append((f"  Motors %     : m1={m[0]:.1f}  m2={m[1]:.1f}  m3={m[2]:.1f}  m4={m[3]:.1f}",
                       (0.70, 0.45, 0.10)))
 
-        lines.append((f"  Estimator    : {est_id} ({entry.state.estimator_name()})",
-                      (0.35, 0.10, 0.55)))
         lines.append((f"  Controller   : {ctrl_id} ({entry.state.controller_name()})",
+                      (0.35, 0.10, 0.55)))
+        lines.append((f"  Estimator    : {est_id} ({entry.state.estimator_name()})",
                       (0.35, 0.10, 0.55)))
 
     return lines

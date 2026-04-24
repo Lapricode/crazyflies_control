@@ -487,7 +487,7 @@ class PlaystationController:
             # Start flight: takeoff / land toggle.
             if rising(self.BTN_OPTIONS):
                 if not self._airborne:
-                    self._cmd_takeoff(STEP_NORMAL_M)
+                    self._cmd_takeoff(STEP_LARGE_M)
                     self.last_cmd = (f"Takeoff → {STEP_NORMAL_M:.3f} m", time.monotonic())
                     print(f"[PS] Takeoff → {STEP_NORMAL_M:.3f} m")
                 else:
