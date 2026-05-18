@@ -20,3 +20,13 @@ configs:
   '5':
     drones:
       1: radio://0/80/2M/E7E7E7E7E7
+  '6':
+    drones:
+      1: radio://0/90/2M/E7E7E7E7AA
+      2: radio://0/90/2M/E7E7E7E7AB
+      3: radio://0/90/2M/E7E7E7E7AC
+      4: radio://0/90/2M/E7E7E7E7AD
+  '7':
+    drones:
+      1: radio://0/90/2M/E7E7E7E7AA
+      2: radio://0/90/2M/E7E7E7E7AB

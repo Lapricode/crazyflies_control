@@ -47,7 +47,7 @@ from collections import deque
 
 from crazyflie import DroneState, CrazyflieThread, MAX_PWM
 from playstation_controller import PlaystationController
-from xbox_controller import XboxController
+# from xbox_controller import XboxController
 
 
 # ==============================================================================
@@ -1800,217 +1800,214 @@ def main():
                 return
             demo_running = True
 
-        for i in range(30):
-            time.sleep(20)
-            
-            try:
-                if demo_id == 1:
-                    dxy_move = 0.5
-                    dyaw_move = 90.0
-                    add_sleep = 1.0
-                    entries = _demo_targets(drones, 1)
-                    if entries is None:
-                        return
-                    e = entries[0]
-                    print("[DEMO 1] Solo movement demo starting.")
+        try:
+            if demo_id == 1:
+                dxy_move = 0.5
+                dyaw_move = 90.0
+                add_sleep = 1.0
+                entries = _demo_targets(drones, 1)
+                if entries is None:
+                    return
+                e = entries[0]
+                print("[DEMO 1] Solo movement demo starting.")
 
+                e.thread.takeoff(0.5, 2.0)
+                time.sleep(2.0+add_sleep)
+
+                e.thread.go_to(dx=+dxy_move, duration=2.0)
+                time.sleep(2.0+add_sleep)
+
+                e.thread.go_to(dx=-dxy_move, duration=1.0)
+                time.sleep(1.0+add_sleep)
+
+                e.thread.go_to(dx=-dxy_move, duration=2.0)
+                time.sleep(2.0+add_sleep)
+
+                e.thread.go_to(dx=+dxy_move, duration=1.0)
+                time.sleep(1.0+add_sleep)
+
+                e.thread.go_to(dy=+dxy_move, duration=2.0)
+                time.sleep(2.0+add_sleep)
+
+                e.thread.go_to(dy=-dxy_move, duration=1.0)
+                time.sleep(1.0+add_sleep)
+
+                e.thread.go_to(dy=-dxy_move, duration=1.0)
+                time.sleep(1.0+add_sleep)
+
+                e.thread.go_to(dy=+dxy_move, duration=1.0)
+                time.sleep(1.0+add_sleep)
+
+                e.thread.go_to(dz=+2.0*dxy_move, duration=1.0)
+                time.sleep(1.0+add_sleep)
+
+                e.thread.go_to(dyaw_deg=+2.0*dyaw_move, duration=1.0)
+                time.sleep(1.0+add_sleep)
+
+                e.thread.go_to(dyaw_deg=-dyaw_move, duration=1.0)
+                time.sleep(1.0+add_sleep)
+
+                e.thread.go_to(dz=-dxy_move, duration=1.0)
+                time.sleep(1.0+add_sleep)
+
+                e.thread.go_to(dyaw_deg=-dyaw_move, duration=1.0)
+                time.sleep(1.0+add_sleep)
+
+                time.sleep(2.0+add_sleep)
+                e.thread.land(2.0)
+
+            elif demo_id == 2:
+                entries = _demo_targets(drones, 2)
+                if entries is None:
+                    return
+                print("[DEMO 2] Two-drone synchronized demo starting.")
+
+                for e in entries:
                     e.thread.takeoff(0.5, 2.0)
-                    time.sleep(2.0+add_sleep)
+                time.sleep(2.2)
 
-                    e.thread.go_to(dx=+dxy_move, duration=2.0)
-                    time.sleep(2.0+add_sleep)
+                for e in entries:
+                    e.thread.go_to(dx=+0.5, duration=2.0)
+                time.sleep(2.2)
 
-                    e.thread.go_to(dx=-dxy_move, duration=1.0)
-                    time.sleep(1.0+add_sleep)
+                for e in entries:
+                    e.thread.go_to(dx=-0.5, duration=1.0)
+                time.sleep(1.2)
 
-                    e.thread.go_to(dx=-dxy_move, duration=2.0)
-                    time.sleep(2.0+add_sleep)
+                for e in entries:
+                    e.thread.go_to(dy=+0.5, duration=2.0)
+                time.sleep(2.2)
 
-                    e.thread.go_to(dx=+dxy_move, duration=1.0)
-                    time.sleep(1.0+add_sleep)
+                for e in entries:
+                    e.thread.go_to(dy=-0.5, duration=1.0)
+                time.sleep(1.2)
 
-                    e.thread.go_to(dy=+dxy_move, duration=2.0)
-                    time.sleep(2.0+add_sleep)
+                for e in entries:
+                    e.thread.go_to(dz=+0.5, duration=1.0)
+                time.sleep(1.2)
 
-                    e.thread.go_to(dy=-dxy_move, duration=1.0)
-                    time.sleep(1.0+add_sleep)
+                for e in entries:
+                    e.thread.go_to(dyaw_deg=+90.0, duration=1.0)
+                time.sleep(1.2)
 
-                    e.thread.go_to(dy=-dxy_move, duration=1.0)
-                    time.sleep(1.0+add_sleep)
+                for e in entries:
+                    e.thread.go_to(dyaw_deg=-90.0, duration=1.0)
+                time.sleep(1.2)
 
-                    e.thread.go_to(dy=+dxy_move, duration=1.0)
-                    time.sleep(1.0+add_sleep)
+                for e in entries:
+                    e.thread.go_to(dz=-0.5, duration=1.0)
+                time.sleep(1.2)
 
-                    e.thread.go_to(dz=+2.0*dxy_move, duration=1.0)
-                    time.sleep(1.0+add_sleep)
+                time.sleep(2.0)
+                for e in entries:
+                    e.thread.land(3.0)
 
-                    e.thread.go_to(dyaw_deg=+2.0*dyaw_move, duration=1.0)
-                    time.sleep(1.0+add_sleep)
+            elif demo_id == 3:
+                entries = _demo_targets(drones, 3)
+                if entries is None:
+                    return
+                print("[DEMO 3] Triangle formation demo starting.")
 
-                    e.thread.go_to(dyaw_deg=-dyaw_move, duration=1.0)
-                    time.sleep(1.0+add_sleep)
+                # Take off to 1.0 m
+                for e in entries:
+                    e.thread.takeoff(1.0, 2.5)
+                time.sleep(2.7)
 
-                    e.thread.go_to(dz=-dxy_move, duration=1.0)
-                    time.sleep(1.0+add_sleep)
+                # Form triangle at z = 1.0 m
+                offsets = [(+1.0, 0.0, 0.0),
+                        (0.0, +1.0, 0.0),
+                        (-1.0, -1.0, 0.0)]
+                for e, (dx, dy, dz) in zip(entries, offsets):
+                    e.thread.go_to(dx=dx, dy=dy, dz=dz, duration=3.0)
+                time.sleep(3.2)
 
-                    e.thread.go_to(dyaw_deg=-dyaw_move, duration=1.0)
-                    time.sleep(1.0+add_sleep)
+                # Up then down
+                for e in entries:
+                    e.thread.go_to(dz=+0.5, duration=1.0)
+                time.sleep(1.2)
 
-                    time.sleep(2.0+add_sleep)
+                for e in entries:
+                    e.thread.go_to(dz=-0.5, duration=1.0)
+                time.sleep(1.2)
+
+                # Blink in turns
+                for e in entries:
+                    e.thread.blink_led(n_blinks=1, period=0.4)
+                    time.sleep(0.8)
+
+                # Blink simultaneously
+                for e in entries:
+                    e.thread.blink_led(n_blinks=2, period=0.4)
+
+                time.sleep(2.0)
+                for e in entries:
                     e.thread.land(2.0)
 
-                elif demo_id == 2:
-                    entries = _demo_targets(drones, 2)
-                    if entries is None:
-                        return
-                    print("[DEMO 2] Two-drone synchronized demo starting.")
+            elif demo_id == 4:
+                entries = _demo_targets(drones, 4)
+                if entries is None:
+                    return
+                print("[DEMO 4] Four-drone swarm demo starting.")
 
-                    for e in entries:
-                        e.thread.takeoff(0.5, 2.0)
-                    time.sleep(2.2)
+                # Optional: match the sample's controller/estimator setup.
+                # If you want to force settings, do it here per drone.
+                # Example:
+                # for e in entries:
+                #     cf = e.thread._cf
+                #     if cf is not None:
+                #         cf.param.set_value("stabilizer.controller", "1")
+                #         cf.param.set_value("stabilizer.estimator", "3")
 
-                    for e in entries:
-                        e.thread.go_to(dx=+0.5, duration=2.0)
-                    time.sleep(2.2)
+                # Bring all drones up first.
+                for e in entries:
+                    e.thread.takeoff(1.0, 3.0)
+                time.sleep(3.2)
 
-                    for e in entries:
-                        e.thread.go_to(dx=-0.5, duration=1.0)
-                    time.sleep(1.2)
+                # A simple swarm motion inspired by your sample:
+                # move to phase-shifted orbit points, then do a short circular sequence.
+                r = 1.25
+                h = 1.20
+                cfs_n = len(entries)
+                phis = [i * (2.0 * math.pi / cfs_n) for i in range(cfs_n)]
 
-                    for e in entries:
-                        e.thread.go_to(dy=+0.5, duration=2.0)
-                    time.sleep(2.2)
+                # Move to starting orbit points
+                for e, phi0 in zip(entries, phis):
+                    x = r * math.cos(phi0)
+                    y = r * math.sin(phi0)
+                    # relative move from the current setpoint
+                    e.thread.go_to(dx=x, dy=y, dz=(h - 1.0), duration=5.0)
+                time.sleep(5.2)
 
-                    for e in entries:
-                        e.thread.go_to(dy=-0.5, duration=1.0)
-                    time.sleep(1.2)
+                # Execute a short coordinated orbit with alternating vertical modulation
+                flight_time = 20.0
+                dt = 0.2
+                steps = int(flight_time / dt) + 1
+                up_down_dist = 0.1
+                up_down_freq = 2.0 * (1.0 / flight_time)
 
-                    for e in entries:
-                        e.thread.go_to(dz=+0.5, duration=1.0)
-                    time.sleep(1.2)
+                for k in range(steps):
+                    phi_circle = 2.0 * math.pi * (1.0 / flight_time) * k * dt
+                    phi_up_down = 2.0 * math.pi * up_down_freq * k * dt
+                    for idx, e in enumerate(entries):
+                        phi = phi_circle + phis[idx]
+                        x = r * math.cos(phi)
+                        y = r * math.sin(phi)
+                        z = h + (up_down_dist * math.sin(phi_up_down) if idx % 2 == 0
+                                else -up_down_dist * math.sin(phi_up_down))
+                        # Because the thread API is relative, we send small relative steps
+                        # by tracking the next waypoint approximately in body/world space.
+                        e.thread.go_to(dx=x, dy=y, dz=(z - h), duration=dt)
+                    time.sleep(dt)
 
-                    for e in entries:
-                        e.thread.go_to(dyaw_deg=+90.0, duration=1.0)
-                    time.sleep(1.2)
+                time.sleep(2.0)
+                for e in entries:
+                    e.thread.land(3.0)
 
-                    for e in entries:
-                        e.thread.go_to(dyaw_deg=-90.0, duration=1.0)
-                    time.sleep(1.2)
+            else:
+                print(f"[DEMO] Unknown demo id: {demo_id}")
 
-                    for e in entries:
-                        e.thread.go_to(dz=-0.5, duration=1.0)
-                    time.sleep(1.2)
-
-                    time.sleep(2.0)
-                    for e in entries:
-                        e.thread.land(3.0)
-
-                elif demo_id == 3:
-                    entries = _demo_targets(drones, 3)
-                    if entries is None:
-                        return
-                    print("[DEMO 3] Triangle formation demo starting.")
-
-                    # Take off to 1.0 m
-                    for e in entries:
-                        e.thread.takeoff(1.0, 2.5)
-                    time.sleep(2.7)
-
-                    # Form triangle at z = 1.0 m
-                    offsets = [(+1.0, 0.0, 0.0),
-                            (0.0, +1.0, 0.0),
-                            (-1.0, -1.0, 0.0)]
-                    for e, (dx, dy, dz) in zip(entries, offsets):
-                        e.thread.go_to(dx=dx, dy=dy, dz=dz, duration=3.0)
-                    time.sleep(3.2)
-
-                    # Up then down
-                    for e in entries:
-                        e.thread.go_to(dz=+0.5, duration=1.0)
-                    time.sleep(1.2)
-
-                    for e in entries:
-                        e.thread.go_to(dz=-0.5, duration=1.0)
-                    time.sleep(1.2)
-
-                    # Blink in turns
-                    for e in entries:
-                        e.thread.blink_led(n_blinks=1, period=0.4)
-                        time.sleep(0.8)
-
-                    # Blink simultaneously
-                    for e in entries:
-                        e.thread.blink_led(n_blinks=2, period=0.4)
-
-                    time.sleep(2.0)
-                    for e in entries:
-                        e.thread.land(2.0)
-
-                elif demo_id == 4:
-                    entries = _demo_targets(drones, 4)
-                    if entries is None:
-                        return
-                    print("[DEMO 4] Four-drone swarm demo starting.")
-
-                    # Optional: match the sample's controller/estimator setup.
-                    # If you want to force settings, do it here per drone.
-                    # Example:
-                    # for e in entries:
-                    #     cf = e.thread._cf
-                    #     if cf is not None:
-                    #         cf.param.set_value("stabilizer.controller", "1")
-                    #         cf.param.set_value("stabilizer.estimator", "3")
-
-                    # Bring all drones up first.
-                    for e in entries:
-                        e.thread.takeoff(1.0, 3.0)
-                    time.sleep(3.2)
-
-                    # A simple swarm motion inspired by your sample:
-                    # move to phase-shifted orbit points, then do a short circular sequence.
-                    r = 1.25
-                    h = 1.20
-                    cfs_n = len(entries)
-                    phis = [i * (2.0 * math.pi / cfs_n) for i in range(cfs_n)]
-
-                    # Move to starting orbit points
-                    for e, phi0 in zip(entries, phis):
-                        x = r * math.cos(phi0)
-                        y = r * math.sin(phi0)
-                        # relative move from the current setpoint
-                        e.thread.go_to(dx=x, dy=y, dz=(h - 1.0), duration=5.0)
-                    time.sleep(5.2)
-
-                    # Execute a short coordinated orbit with alternating vertical modulation
-                    flight_time = 20.0
-                    dt = 0.2
-                    steps = int(flight_time / dt) + 1
-                    up_down_dist = 0.1
-                    up_down_freq = 2.0 * (1.0 / flight_time)
-
-                    for k in range(steps):
-                        phi_circle = 2.0 * math.pi * (1.0 / flight_time) * k * dt
-                        phi_up_down = 2.0 * math.pi * up_down_freq * k * dt
-                        for idx, e in enumerate(entries):
-                            phi = phi_circle + phis[idx]
-                            x = r * math.cos(phi)
-                            y = r * math.sin(phi)
-                            z = h + (up_down_dist * math.sin(phi_up_down) if idx % 2 == 0
-                                    else -up_down_dist * math.sin(phi_up_down))
-                            # Because the thread API is relative, we send small relative steps
-                            # by tracking the next waypoint approximately in body/world space.
-                            e.thread.go_to(dx=x, dy=y, dz=(z - h), duration=dt)
-                        time.sleep(dt)
-
-                    time.sleep(2.0)
-                    for e in entries:
-                        e.thread.land(3.0)
-
-                else:
-                    print(f"[DEMO] Unknown demo id: {demo_id}")
-
-            finally:
-                demo_running = False
+        finally:
+            demo_running = False
 
     # camera operations
     camera_state.track_num = None   # camera tracking state (None = manual, int = track drone N)
