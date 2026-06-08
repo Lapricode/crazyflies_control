@@ -38,6 +38,7 @@
         $$
 
     - normalized PWM vs. normalized thrust (`N`):
+
         $$
         \mathrm{norm_{PWM}} = -0.50863 + \sqrt{0.25871 + 2.01727 \cdot \mathrm{norm_{F_{i}}}}
         $$
