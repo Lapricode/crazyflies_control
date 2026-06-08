@@ -9,39 +9,27 @@
 3. I have created plots in GeoGebra (file `crazyflie_dynamics_curves.ggb`) for the functional relationships between various useful quantities of the Crazyflie dynamic model. For example (all of the following relationships refer to only 1 of the 4 motors):
     - rotor speed (`rad/sec`) vs. PWM:
 
-        $$
-        \omega_{r} = \sqrt{8 \cdot 10^{-4} \cdot \mathrm{PWM}^2 + 53.33 \cdot \mathrm{PWM}}
-        $$
+        $$\omega_{r} = \sqrt{8 \cdot 10^{-4} \cdot \mathrm{PWM}^2 + 53.33 \cdot \mathrm{PWM}}$$
 
     - PWM vs. rotor speed (`rad/sec`):
 
-        $$
-        \mathrm{PWM} = -33333.0 + \sqrt{1250.0 \cdot \omega_{r}^2 + 1111111111.0}
-        $$
+        $$\mathrm{PWM} = -33333.0 + \sqrt{1250.0 \cdot \omega_{r}^2 + 1111111111.0}$$
 
     - thrust (`N`) vs. rotor speed (`rad/sec`):
 
-        $$
-        F_{i} = k_{f} \omega_{r}^2 = 2.25 \cdot 10^{-8} \omega_{r}^2
-        $$
+        $$F_{i} = k_{f} \omega_{r}^2 = 2.25 \cdot 10^{-8} \omega_{r}^2$$
 
     - thrust (`N`) vs. PWM:
 
-        $$
-        F_{i} = 1.8 \cdot 10^{-11} \cdot \mathrm{PWM}^2 + 1.2 \cdot 10^{-6} \cdot \mathrm{PWM}
-        $$
+        $$F_{i} = 1.8 \cdot 10^{-11} \cdot \mathrm{PWM}^2 + 1.2 \cdot 10^{-6} \cdot \mathrm{PWM}$$
 
     - PWM vs. normalized thrust (`N`):
 
-        $$
-        \mathrm{PWM} = -33333.0 + \sqrt{8663836225.0 \cdot \mathrm{norm_{F_{i}}} + 1111111111.0}
-        $$
+        $$\mathrm{PWM} = -33333.0 + \sqrt{8663836225.0 \cdot \mathrm{norm_{F_{i}}} + 1111111111.0}$$
 
     - normalized PWM vs. normalized thrust (`N`):
 
-        $$
-        \mathrm{norm_{PWM}} = -0.50863 + \sqrt{0.25871 + 2.01727 \cdot \mathrm{norm_{F_{i}}}}
-        $$
+        $$\mathrm{norm_{PWM}} = -0.50863 + \sqrt{0.25871 + 2.01727 \cdot \mathrm{norm_{F_{i}}}}$$
 
     I consulted the following works:
     - https://lup.lub.lu.se/luur/download?func=downloadFile&recordOId=8905295&fileOId=8905299 (specifically Appendix A)
