@@ -1,3 +1,4 @@
+from pathlib import Path
 import os
 import json
 import numpy as np
@@ -7,12 +8,12 @@ import LQR_controller.S3_rotation as S3
 
 """
 Quadrotor system:
-state:      x = [rw, qwb, vb, omegab] \in R^(13x1)
-            where   rw \in R^(3x1) is the position in the world frame
-                    qwb \in R^(4x1) is the orientation quaternion of the body frame w.r.t. the world frame
-                    vb \in R^(3x1) is the linear velocity in the body frame
-                    omegab \in R^(3x1) is the angular velocity in the body frame
-control:    u = [u1, u2, u3, u4] \in R^(4x1)
+state:      x = [rw, qwb, vb, omegab] in R^(13x1)
+            where   rw in R^(3x1) is the position in the world frame
+                    qwb in R^(4x1) is the orientation quaternion of the body frame w.r.t. the world frame
+                    vb in R^(3x1) is the linear velocity in the body frame
+                    omegab in R^(3x1) is the angular velocity in the body frame
+control:    u = [u1, u2, u3, u4] in R^(4x1)
             where u_i is the angular speed of the i-th motor in rad/s
 rotors:     Fi = Kf * ui^2
             Ti = Kt * ui^2
@@ -23,8 +24,8 @@ rotors:     Fi = Kf * ui^2
             the motor arms form right angles (90 degrees) with each other
 note:   the state x comes with the quaternion qwb of the rotation matrix Rwb,
         but we also use the rotation matrix Rwb directly for the dynamics and the jacobians calculations
-        Rwb \in R^(3x3) is the rotation matrix of the body frame w.r.t. the world frame
-        Rwb \in R^(3x3) has dimension 3, this is the dimension of its Lie algebra vector
+        Rwb in R^(3x3) is the rotation matrix of the body frame w.r.t. the world frame
+        Rwb in R^(3x3) has dimension 3, this is the dimension of its Lie algebra vector
 """
 
 
@@ -231,7 +232,7 @@ def tvlqr(xk, uk, Q, Qf, R, Knum):
 
 
 def compute_state_right_minus(x_1, x_2):
-    # x_1 and x_2 are both \in R^(13x1)
+    # x_1 and x_2 are both in R^(13x1)
     rw_1 = x_1[:3]
     qwb_1 = x_1[3:7]
     Rwb_1 = S3.Rq_mat(qwb_1)
@@ -249,11 +250,11 @@ def compute_state_right_minus(x_1, x_2):
     # x_error = np.concatenate([rw_error, qwb_error, vb_error, omegab_error])
     Rwb_error = SO3.minus_right(Rwb_1, Rwb_2)
     x_error = np.concatenate([rw_error, Rwb_error, vb_error, omegab_error])
-    return x_error  # \in R^(12x1)
+    return x_error  # in R^(12x1)
 
 
 def compute_state_right_plus(x, dx):
-    # x is \in R^(13x1) and dx is \in R^(12x1)
+    # x is in R^(13x1) and dx is in R^(12x1)
     rw = x[:3]
     qwb = x[3:7]
     Rwb = S3.Rq_mat(qwb)
@@ -271,48 +272,66 @@ def compute_state_right_plus(x, dx):
     # x_sum = np.concatenate([rw_sum, qwb_sum, vb_sum, omegab_sum])
     Rwb_sum = SO3.plus_right(Rwb, dRwb)
     x_sum = np.concatenate([rw_sum, SO3.qR_quat(Rwb_sum), vb_sum, omegab_sum])
-    return x_sum  # \in R^(13x1)
+    return x_sum  # in R^(13x1)
 
 
 def run_quadrotor_regulate_configuration(x0, x_ref, u_bar, u_max, Kinf, dt, tf):
     x = np.copy(x0)
+
+    states = []
     positions = []
     orientations = []
     control_inputs = []
+
     for k in range(round(tf / dt)):
+        states.append(x.copy())
+
         rw = x[:3]
         Rwb = S3.Rq_mat(x[3:7])
-        positions.append(rw)
-        orientations.append(Rwb)
-        u = u_bar - Kinf @ (compute_state_right_minus(x, x_ref))
+
+        positions.append(rw.copy())
+        orientations.append(Rwb.copy())
+
+        u = u_bar - Kinf @ compute_state_right_minus(x, x_ref)
         u = np.clip(u, 0.0, u_max)
-        control_inputs.append(u)
+        control_inputs.append(u.copy())
+
         x = euler(x, u, quadrotor_dynamics, dt)
-        # x = runge_kutta_4th_order(x, u, quadrotor_dynamics, dt)
+
     print(f"Final error: {compute_state_right_minus(x, x_ref)}")
-    return positions, orientations, control_inputs
+    return np.array(states), positions, orientations, np.array(control_inputs)
 
 
 def run_quadrotor_track_trajectory(x0, xk, u_bar, u_max, Kc, dt, tf):
     x = np.copy(x0)
+
+    states = []
     positions = []
     orientations = []
     control_inputs = []
+
     for k in range(round(tf / dt)):
+        states.append(x.copy())
+
         rw = x[:3]
         Rwb = S3.Rq_mat(x[3:7])
-        positions.append(rw)
-        orientations.append(Rwb)
+
+        positions.append(rw.copy())
+        orientations.append(Rwb.copy())
+
         # noise = np.random.rand(N+1) / 10.
         # noise[7:N+1] = np.zeros((N-6,))
         # x_noisy = x + noise
         # x_noisy[3:7] = x_noisy[3:7] / np.linalg.norm(x_noisy)
-        u = u_bar - Kc[k] @ (compute_state_right_minus(x, xk[k]))
+
+        u = u_bar - Kc[k] @ compute_state_right_minus(x, xk[k])
         u = np.clip(u, 0.0, u_max)
-        control_inputs.append(u)
+        control_inputs.append(u.copy())
+
         x = euler(x, u, quadrotor_dynamics, dt)
         # x = runge_kutta_4th_order(x, u, quadrotor_dynamics, dt)
-    return positions, orientations, control_inputs
+
+    return np.array(states), positions, orientations, np.array(control_inputs)
 
 
 def save_Kinf_mat(Kinf, file):
@@ -343,109 +362,208 @@ def rpy_to_quat(rpy):  # rpy is an array: [roll, pitch, yaw], in radians
     return np.array([w, x, y, z])
 
 
-dt = 1e-2
-yaw_bar = 0.0
-q_bar = rpy_to_quat(np.array([0.0, 0.0, yaw_bar]))
-x_bar = np.block([0.0, 0.0, 0.0, q_bar, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-u_bar = np.sqrt(m * g / 4 / Kf) * np.ones(4)
-# rpy_bar = np.array([0.5, 0.7, 1.0])
-# q_bar = rpy_to_quat(rpy_bar)
-# x_bar = 5. * np.random.randn(13,)
-# x_bar[3:7] = q_bar
-# u_bar = 1000. * np.abs(np.random.randn(4,))
-A_num, B_num = finite_differences(euler_wrap, x_bar, u_bar, dt, 1e-5)
-A_an, B_an = linearize_euler(x_bar, u_bar, dt)
-# dec_digits_shown = 3
-# print("A_an: ", np.round(A_an, dec_digits_shown))
-# print("A_num: ", np.round(A_num, dec_digits_shown))
-# print(np.round(A_an - A_num, dec_digits_shown))
-# print("B_an: ", np.round(B_an, dec_digits_shown))
-# print("B_num: ", np.round(B_num, dec_digits_shown))
-# print(np.round(B_an - B_num, dec_digits_shown))
-print("x_bar =", x_bar)
-print("u_bar =", u_bar)
-print("‖A_num − A_an‖_∞ =", np.max(np.abs(A_num - A_an)))
-print("‖B_num − B_an‖_∞ =", np.max(np.abs(B_num - B_an)))
+from pathlib import Path
+import json
+import numpy as np
 
-# setup the cost matrices of the LQR controller, and the initial state
-Q = np.eye(N)
-Q[0, 0] = 100000.0
-Q[1:3, 1:3] = 10000.0 * np.eye(2)
-Q[3:6, 3:6] = 10000.0 * np.eye(3)
-Q[6:9, 6:9] = 3000.0 * np.eye(3)
-Q[9:12, 9:12] = 5000.0 * np.eye(3)
-Qf = 10000.0 * np.eye(N)
-R = 0.001 * np.eye(M)
-r0 = np.array([0.0, 0.0, 0.0])
-rpy0 = np.array([0.0, 0.0, 0.0])
-q0 = rpy_to_quat(rpy0)
-x0 = np.block([r0, q0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-# regulate a certain crazyflie configuration (position and yaw orientation)
-dt = 1e-2
-tf = 10
-r_bar = np.array([0.0, 0.0, 0.0])
-yaw_bar = 0.0
-rpy_bar = np.array([0.0, 0.0, yaw_bar])
-q_bar = rpy_to_quat(rpy_bar)
-x_bar = np.block([r_bar, q_bar, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-u_bar = np.sqrt(m * g / 4 / Kf) * np.ones(4)  # hovering control input
-A, B = linearize_euler(x_bar, u_bar, dt)
-# A, B = finite_differences(euler_wrap, x_bar, u_bar, dt, 1e-5)
-# A, B = finite_differences(rk4_wrap, x_bar, u_bar, dt, 1e-5)
-Kinf = lqr(A, B, Q, Qf, R, round(tf / dt))
-print(f"Kinf: {np.round(Kinf, 5)}")
-r_ref = np.array([1.0, 1.0, 1.0])
-rpy_ref = np.array([0.0, 0.0, 0.0])
-q_ref = rpy_to_quat(rpy_ref)
-x_ref = np.block([r_ref, q_ref, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-u_ref = np.sqrt(m * g / 4 / Kf) * np.ones(4)  # hovering control input
-positions, orientations, control_inputs = run_quadrotor_regulate_configuration(
-    x0, x_ref, u_bar, u_max, Kinf, dt, tf
-)
-save_Kinf_mat(Kinf, "Kinf_speeds.txt")
-quadrotor_visualize(
-    positions,
-    orientations,
-    control_inputs,
-    u_max,
-    0.01,
-    int(1 / (10 * dt)),
-    0.25,
+def save_animation_files(
+    dt,
+    m,
+    l,
     body_yaw0,
-    cam_onboard=True,
-)
+    u_max,
+    g,
+    Kf,
+    Kt,
+    states,
+    controls,
+    positions=None,
+    orientations=None,
+    folder=None,
+):
+    base_dir = Path(__file__).resolve().parent
+    out_dir = base_dir / "animation" if folder is None else Path(folder)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-# # track a circular trajectory
-# dt = 1e-2
-# tf = 10
-# total_time_vec = np.arange(0, tf, dt)
-# tt = 1/5 * tf
-# x_initial_traj = np.array([1.0, 2.0, 0.5, \
-#                             1.0, 0.0, 0.0, 0.0, \
-#                             0.0, 0.0, 0.0, \
-#                             0.0, 0.0, 0.0])
-# r = 1.0
-# freq_circle = 0.05
-# freq_bodyrot = freq_circle / 2
-# x_center = x_initial_traj[0] - r
-# y_center = x_initial_traj[1]
-# h = x_initial_traj[2]
-# xk_traj = [np.array([x_center + r * np.cos(2 * np.pi * freq_circle * t), y_center + r * np.sin(2 * np.pi * freq_circle * t), h, \
-#                     np.cos(((2 * np.pi * freq_bodyrot * t) % (2 * np.pi)) / 2.), 0.0, 0.0, np.sin(((2 * np.pi * freq_bodyrot * t) % (2 * np.pi)) / 2.), \
-#                     0.0, 0.0, 0.0, \
-#                     0.0, 0.0, 0.0]) for t in np.arange(0, tf - tt, dt)]
-# uk_traj = len(total_time_vec) * [u_ref]
-# A, B = linearize_euler(x_initial_traj, u_ref, dt)
-# Kinf = lqr(A, B, Q, Qf, R, round(tt / dt))
-# positions_1, orientations_1, control_inputs_1 = run_quadrotor_regulate_configuration(x0, x_initial_traj, u_ref, u_max, Kinf, dt, tt)
-# Kc = tvlqr(xk_traj, uk_traj, Q, Qf, R, round((tf - tt) / dt))
-# x0_tt = np.block([np.array(positions_1[-1]), \
-#                     1.0, 0.0, 0.0, 0.0, \
-#                     0.0, 0.0, 0.0, \
-#                     0.0, 0.0, 0.0])
-# positions_2, orientations_2, control_inputs_2 = run_quadrotor_track_trajectory(x0_tt, xk_traj, u_ref, u_max, Kc, dt, tf - tt)
-# positions = positions_1 + positions_2
-# orientations = orientations_1 + orientations_2
-# control_inputs = control_inputs_1 + control_inputs_2
-# quadrotor_visualize(positions, orientations, control_inputs, u_max, 0.01, int(1/(10*dt)), 0.5, body_yaw0, cam_onboard = False)
+    np.savetxt(out_dir / "crazyflie_states.csv", states, delimiter=",")
+    np.savetxt(out_dir / "crazyflie_controls.csv", controls, delimiter=",")
+
+    if positions is not None:
+        np.savetxt(
+            out_dir / "crazyflie_positions.csv", np.asarray(positions), delimiter=","
+        )
+
+    if orientations is not None:
+        orientations = np.asarray(orientations)
+        np.savetxt(
+            out_dir / "crazyflie_orientations.csv",
+            orientations.reshape(orientations.shape[0], -1),
+            delimiter=",",
+        )
+
+    params_out = {
+        "freq": 1.0 / dt,
+        "dt": dt,
+        "mass": m,
+        "arm_length": l,
+        "body_yaw0": float(body_yaw0),
+        "u_max": np.asarray(u_max).tolist(),
+        "g": g,
+        "Kf": Kf,
+        "Kt": Kt,
+    }
+
+    with open(out_dir / "crazyflie_params.json", "w") as f:
+        json.dump(params_out, f, indent=4)
+
+    print(f'Saved simulation files in "{out_dir}/"')
+
+
+if __name__ == "__main__":
+
+    dt = 1e-2
+    yaw_bar = 0.0
+    q_bar = rpy_to_quat(np.array([0.0, 0.0, yaw_bar]))
+    x_bar = np.block([0.0, 0.0, 0.0, q_bar, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    u_bar = np.sqrt(m * g / 4 / Kf) * np.ones(4)
+    # rpy_bar = np.array([0.5, 0.7, 1.0])
+    # q_bar = rpy_to_quat(rpy_bar)
+    # x_bar = 5. * np.random.randn(13,)
+    # x_bar[3:7] = q_bar
+    # u_bar = 1000. * np.abs(np.random.randn(4,))
+    A_num, B_num = finite_differences(euler_wrap, x_bar, u_bar, dt, 1e-5)
+    A_an, B_an = linearize_euler(x_bar, u_bar, dt)
+    # dec_digits_shown = 3
+    # print("A_an: ", np.round(A_an, dec_digits_shown))
+    # print("A_num: ", np.round(A_num, dec_digits_shown))
+    # print(np.round(A_an - A_num, dec_digits_shown))
+    # print("B_an: ", np.round(B_an, dec_digits_shown))
+    # print("B_num: ", np.round(B_num, dec_digits_shown))
+    # print(np.round(B_an - B_num, dec_digits_shown))
+    print("x_bar =", x_bar)
+    print("u_bar =", u_bar)
+    print("‖A_num − A_an‖_∞ =", np.max(np.abs(A_num - A_an)))
+    print("‖B_num − B_an‖_∞ =", np.max(np.abs(B_num - B_an)))
+
+    # setup the cost matrices of the LQR controller, and the initial state
+    Q = np.eye(N)
+    Q[0, 0] = 100000.0
+    Q[1:3, 1:3] = 10000.0 * np.eye(2)
+    Q[3:6, 3:6] = 10000.0 * np.eye(3)
+    Q[6:9, 6:9] = 3000.0 * np.eye(3)
+    Q[9:12, 9:12] = 5000.0 * np.eye(3)
+    Qf = 10000.0 * np.eye(N)
+    R = 0.001 * np.eye(M)
+    r0 = np.array([0.0, 0.0, 0.0])
+    rpy0 = np.array([0.0, 0.0, 0.0])
+    q0 = rpy_to_quat(rpy0)
+    x0 = np.block([r0, q0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+    # regulate a certain crazyflie configuration (position and yaw orientation)
+    dt = 1e-2
+    tf = 10
+    r_bar = np.array([0.0, 0.0, 0.0])
+    yaw_bar = 0.0
+    rpy_bar = np.array([0.0, 0.0, yaw_bar])
+    q_bar = rpy_to_quat(rpy_bar)
+    x_bar = np.block([r_bar, q_bar, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    u_bar = np.sqrt(m * g / 4 / Kf) * np.ones(4)  # hovering control input
+    A, B = linearize_euler(x_bar, u_bar, dt)
+    # A, B = finite_differences(euler_wrap, x_bar, u_bar, dt, 1e-5)
+    # A, B = finite_differences(rk4_wrap, x_bar, u_bar, dt, 1e-5)
+    Kinf = lqr(A, B, Q, Qf, R, round(tf / dt))
+    print(f"Kinf: {np.round(Kinf, 5)}")
+    r_ref = np.array([1.0, 1.0, 1.0])
+    rpy_ref = np.array([0.0, 0.0, 0.0])
+    q_ref = rpy_to_quat(rpy_ref)
+    x_ref = np.block([r_ref, q_ref, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    u_ref = np.sqrt(m * g / 4 / Kf) * np.ones(4)  # hovering control input
+
+    states, positions, orientations, control_inputs = (
+        run_quadrotor_regulate_configuration(x0, x_ref, u_bar, u_max, Kinf, dt, tf)
+    )
+
+    save_Kinf_mat(Kinf, "Kinf_speeds.txt")
+    save_animation_files(
+        dt=dt,
+        m=m,
+        l=l,
+        body_yaw0=body_yaw0,
+        u_max=u_max,
+        g=g,
+        Kf=Kf,
+        Kt=Kt,
+        states=states,
+        controls=control_inputs,
+        positions=positions,
+        orientations=orientations,
+        folder="LQR_controller/animation",
+    )
+
+    quadrotor_visualize()
+    # quadrotor_visualize(
+    #     positions,
+    #     orientations,
+    #     control_inputs,
+    #     u_max,
+    #     0.01,
+    #     int(1 / (10 * dt)),
+    #     0.25,
+    #     body_yaw0,
+    #     cam_onboard=True,
+    # )
+
+    # # track a circular trajectory
+    # dt = 1e-2
+    # tf = 10
+    # total_time_vec = np.arange(0, tf, dt)
+    # tt = 1/5 * tf
+    # x_initial_traj = np.array([1.0, 2.0, 0.5, \
+    #                             1.0, 0.0, 0.0, 0.0, \
+    #                             0.0, 0.0, 0.0, \
+    #                             0.0, 0.0, 0.0])
+    # r = 1.0
+    # freq_circle = 0.05
+    # freq_bodyrot = freq_circle / 2
+    # x_center = x_initial_traj[0] - r
+    # y_center = x_initial_traj[1]
+    # h = x_initial_traj[2]
+    # xk_traj = [np.array([x_center + r * np.cos(2 * np.pi * freq_circle * t), y_center + r * np.sin(2 * np.pi * freq_circle * t), h, \
+    #                     np.cos(((2 * np.pi * freq_bodyrot * t) % (2 * np.pi)) / 2.), 0.0, 0.0, np.sin(((2 * np.pi * freq_bodyrot * t) % (2 * np.pi)) / 2.), \
+    #                     0.0, 0.0, 0.0, \
+    #                     0.0, 0.0, 0.0]) for t in np.arange(0, tf - tt, dt)]
+    # uk_traj = len(total_time_vec) * [u_ref]
+    # A, B = linearize_euler(x_initial_traj, u_ref, dt)
+    # Kinf = lqr(A, B, Q, Qf, R, round(tt / dt))
+    # positions_1, orientations_1, control_inputs_1 = run_quadrotor_regulate_configuration(x0, x_initial_traj, u_ref, u_max, Kinf, dt, tt)
+    # Kc = tvlqr(xk_traj, uk_traj, Q, Qf, R, round((tf - tt) / dt))
+    # x0_tt = np.block([np.array(positions_1[-1]), \
+    #                     1.0, 0.0, 0.0, 0.0, \
+    #                     0.0, 0.0, 0.0, \
+    #                     0.0, 0.0, 0.0])
+    # states_2, positions_2, orientations_2, control_inputs_2 = run_quadrotor_track_trajectory(
+    #     x0_tt, xk_traj, u_ref, u_max, Kc, dt, tf - tt
+    # )
+    # states = np.vstack([states_1, states_2])
+    # positions = positions_1 + positions_2
+    # orientations = orientations_1 + orientations_2
+    # control_inputs = np.vstack([control_inputs_1, control_inputs_2])
+    # save_animation_files(
+    #     states=states,
+    #     controls=control_inputs,
+    #     positions=positions,
+    #     orientations=orientations,
+    #     folder="animation",
+    # )
+    # quadrotor_visualize(
+    #     positions,
+    #     orientations,
+    #     control_inputs,
+    #     u_max,
+    #     0.01,
+    #     int(1 / (10 * dt)),
+    #     0.5,
+    #     body_yaw0,
+    #     cam_onboard=False,
+    # )

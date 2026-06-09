@@ -1,5 +1,5 @@
 import numpy as np
-from LQR_controller.visualize_crazyflie import quadrotor_visualize
+from LQR_controller.visualize_crazyflie_old import quadrotor_visualize
 import LQR_controller.SO3_rotation as SO3
 import LQR_controller.S3_rotation as S3
 
