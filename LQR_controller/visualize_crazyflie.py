@@ -36,7 +36,7 @@ from matplotlib.animation import FuncAnimation
 # ---------------------------------------------------------------------------
 
 
-def quadrotor_visualize(folder: str = "animation") -> None:
+def quadrotor_visualize(folder: str = "animation", states_step: int = 1) -> None:
     """Load saved simulation data and show the interactive animation."""
 
     # -----------------------------------------------------------------------
@@ -56,6 +56,7 @@ def quadrotor_visualize(folder: str = "animation") -> None:
         anim_dir / "crazyflie_orientations.csv", delimiter=","
     )
     orientations = orientations_flat.reshape(-1, 3, 3)
+    yaw = np.unwrap(np.arctan2(orientations[:, 1, 0], orientations[:, 0, 0]))
 
     with open(anim_dir / "crazyflie_params.json", "r") as f:
         params = json.load(f)
@@ -69,6 +70,7 @@ def quadrotor_visualize(folder: str = "animation") -> None:
     # Derived quantities
     # -----------------------------------------------------------------------
     num_frames = positions.shape[0]
+    display_frames = (num_frames - 1) // states_step + 1
     total_time = (num_frames - 1) * dt
 
     # Body-frame geometry (before world rotation)
@@ -105,11 +107,11 @@ def quadrotor_visualize(folder: str = "animation") -> None:
     fig = plt.figure(figsize=(16, 9))
     fig.suptitle("Crazyflie LQR simulation", fontsize=13)
 
-    ax3d = fig.add_subplot(2, 3, (1, 4), projection="3d")
-    ax_x = fig.add_subplot(2, 3, 2)
-    ax_v = fig.add_subplot(2, 3, 3)
-    ax_om = fig.add_subplot(2, 3, 5)
-    ax_u = fig.add_subplot(2, 3, 6)
+    ax3d = fig.add_subplot(1, 2, 1, projection="3d")
+    ax_x = fig.add_subplot(2, 4, 3)
+    ax_v = fig.add_subplot(2, 4, 4)
+    ax_om = fig.add_subplot(2, 4, 7)
+    ax_u = fig.add_subplot(2, 4, 8)
 
     # 3-D view
     ax3d.set_title("3-D trajectory")
@@ -123,21 +125,26 @@ def quadrotor_visualize(folder: str = "animation") -> None:
 
     # Time-history axes
     colors_xyz = ("r", "g", "b")
+    color_yaw = "k"
     colors_u = ("r", "g", "b", "m")
 
-    ax_x.set_title("Position  rw  (m)")
+    ax_x.set_title("Position  $r_w$  (m)")
     ax_x.set_xlabel("t (s)")
     ax_x.set_ylabel("m")
     ax_x.set_xlim(0.0, total_time)
     ax_x.set_ylim(*_ylim(positions))
 
-    ax_v.set_title("Body velocity  vb  (m/s)")
+    ax_x_r = ax_x.twinx()
+    ax_x_r.set_ylabel("yaw (rad)")
+    ax_x_r.set_ylim(*_ylim(yaw))
+
+    ax_v.set_title("Body velocity  $v_b$  (m/s)")
     ax_v.set_xlabel("t (s)")
     ax_v.set_ylabel("m/s")
     ax_v.set_xlim(0.0, total_time)
     ax_v.set_ylim(*_ylim(states[:, 7:10]))
 
-    ax_om.set_title("Angular velocity  ωb  (rad/s)")
+    ax_om.set_title("Angular velocity  $ω_b$  (rad/s)")
     ax_om.set_xlabel("t (s)")
     ax_om.set_ylabel("rad/s")
     ax_om.set_xlim(0.0, total_time)
@@ -159,6 +166,8 @@ def quadrotor_visualize(folder: str = "animation") -> None:
         for lbl, col in zip(labels, cols):
             ax.plot([], [], color=col, lw=1, label=lbl)
         ax.legend(fontsize=7, loc="upper right")
+    ax_x_r.plot([], [], color=color_yaw, lw=1, label="yaw")
+    ax_x_r.legend(fontsize=7, loc="lower right")
 
     # -----------------------------------------------------------------------
     # Artists – 3-D body
@@ -181,6 +190,7 @@ def quadrotor_visualize(folder: str = "animation") -> None:
     # Artists – time-history lines
     # -----------------------------------------------------------------------
     pos_lines = [ax_x.plot([], [], color=c, lw=1)[0] for c in colors_xyz]
+    yaw_line = ax_x_r.plot([], [], color="k", lw=1.5, label="yaw")[0]
     vel_lines = [ax_v.plot([], [], color=c, lw=1)[0] for c in colors_xyz]
     om_lines = [ax_om.plot([], [], color=c, lw=1)[0] for c in colors_xyz]
     u_lines = [ax_u.plot([], [], color=c, lw=1)[0] for c in colors_u]
@@ -203,7 +213,7 @@ def quadrotor_visualize(folder: str = "animation") -> None:
     # Update
     # -----------------------------------------------------------------------
     def update(_):
-        k = anim_state["frame"]
+        k = anim_state["frame"] * states_step
 
         if k >= num_frames:
             anim_state["frame"] = 0
@@ -253,15 +263,17 @@ def quadrotor_visualize(folder: str = "animation") -> None:
         time_text.set_text(f"t = {k * dt:.2f} s")
 
         # Update time-history plots
-        idx = np.arange(0, k + 1)
+        idx = np.arange(0, k + 1, states_step)
         t_h = idx * dt
         rw_h = positions[idx]
+        yaw_h = yaw[idx]
         vb_h = states[idx, 7:10]
         om_h = states[idx, 10:13]
         u_h = controls[idx]
 
         for i, ln in enumerate(pos_lines):
             ln.set_data(t_h, rw_h[:, i])
+        yaw_line.set_data(t_h, yaw_h)
         for i, ln in enumerate(vel_lines):
             ln.set_data(t_h, vb_h[:, i])
         for i, ln in enumerate(om_lines):
@@ -269,9 +281,9 @@ def quadrotor_visualize(folder: str = "animation") -> None:
         for i, ln in enumerate(u_lines):
             ln.set_data(t_h, u_h[:, i])
 
-        t_now = [k * dt, k * dt]
+        t_now = k * dt
         for cur in cursors:
-            cur.set_xdata(t_now)
+            cur.set_xdata([t_now, t_now])
 
         if not anim_state["paused"]:
             anim_state["frame"] += 1
@@ -287,6 +299,7 @@ def quadrotor_visualize(folder: str = "animation") -> None:
             *ctrl_lines,
             *ctrl_texts,
             *pos_lines,
+            yaw_line,
             *vel_lines,
             *om_lines,
             *u_lines,
@@ -309,7 +322,7 @@ def quadrotor_visualize(folder: str = "animation") -> None:
 
         elif key == "up":
             anim_state["paused"] = True
-            anim_state["frame"] = min(anim_state["frame"] + 1, num_frames - 1)
+            anim_state["frame"] = min(anim_state["frame"] + 1, display_frames - 1)
             update(None)
             fig.canvas.draw_idle()
 
