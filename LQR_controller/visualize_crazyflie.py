@@ -78,7 +78,7 @@ def quadrotor_visualize(folder: str = "animation", states_step: int = 1) -> None
     body_orient0 = np.array([[cy, -sy, 0.0], [sy, cy, 0.0], [0.0, 0.0, 1.0]])
 
     p_body = np.array([0.0, 0.0, 0.0])
-    p_antenna = l / 4 * np.array([-1.0 / np.sqrt(2), 1.0 / np.sqrt(2), 0.0])
+    p_antenna = (3.0 * l / 4.0) * np.array([-1.0 / np.sqrt(2), 1.0 / np.sqrt(2), 0.0])
     p_motor1 = np.array([0.0, l, 0.0])
     p_motor2 = np.array([l, 0.0, 0.0])
     p_motor3 = np.array([0.0, -l, 0.0])
@@ -122,20 +122,20 @@ def quadrotor_visualize(folder: str = "animation", states_step: int = 1) -> None
     ax3d.set_xlim(x_min - ax_margin, x_min + ax_range + ax_margin)
     ax3d.set_ylim(y_min - ax_margin, y_min + ax_range + ax_margin)
     ax3d.set_zlim(0.0, z_max + ax_margin)
+    ax3d.set_aspect("equal")
 
     # Time-history axes
     colors_xyz = ("r", "g", "b")
     color_yaw = "k"
     colors_u = ("r", "g", "b", "m")
 
-    ax_x.set_title("Position  $r_w$  (m)")
+    ax_x.set_title("Pose  $r_w, \\theta_{yaw}$  (m, rad)")
     ax_x.set_xlabel("t (s)")
     ax_x.set_ylabel("m")
     ax_x.set_xlim(0.0, total_time)
     ax_x.set_ylim(*_ylim(positions))
-
     ax_x_r = ax_x.twinx()
-    ax_x_r.set_ylabel("yaw (rad)")
+    ax_x_r.set_ylabel("rad")
     ax_x_r.set_ylim(*_ylim(yaw))
 
     ax_v.set_title("Body velocity  $v_b$  (m/s)")

@@ -449,7 +449,7 @@ if __name__ == "__main__":
     x0 = np.block([r0, q0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
     # regulate a certain crazyflie configuration (position and yaw orientation)
-    dt = 1e-2
+    dt = 1e-3
     tf = 10
     lqr_steps = round(tf / dt)
 
@@ -462,7 +462,6 @@ if __name__ == "__main__":
         for q_bar in q_bar_list
     ]
     Kinf_list = []
-
     for x_bar in x_bar_list:
         A, B = linearize_euler(x_bar, u_bar, dt)
         # A, B = finite_differences(euler_wrap, x_bar, u_bar, dt, 1e-5)
@@ -470,11 +469,8 @@ if __name__ == "__main__":
         Kinf = lqr(A, B, Q, Qf, R, lqr_steps)
         Kinf_list.append(Kinf)
 
-    for Kinf in Kinf_list:
-        print(f"Kinf: {np.round(Kinf, 5)}")
-
     r_ref = np.array([1.0, 1.0, 1.0])
-    yaw_ref = np.pi / 4.0
+    yaw_ref = np.pi / 2.0
     rpy_ref = np.array([0.0, 0.0, yaw_ref])
     q_ref = rpy_to_quat(rpy_ref)
     x_ref = np.block([r_ref, q_ref, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -482,7 +478,13 @@ if __name__ == "__main__":
 
     states, positions, orientations, control_inputs = (
         run_quadrotor_regulate_configuration(
-            x0, x_ref, u_bar, u_max, Kinf_list[0], dt, tf
+            x0,
+            x_ref,
+            u_bar,
+            u_max,
+            Kinf_list[int(yaw_ref // (2.0 * np.pi / bar_points_num))],
+            dt,
+            tf,
         )
     )
 
@@ -503,7 +505,7 @@ if __name__ == "__main__":
         folder="LQR_controller/animation",
     )
 
-    quadrotor_visualize(folder="animation", states_step=5)
+    quadrotor_visualize(folder="animation", states_step=40)
 
     # # track a circular trajectory
     # dt = 1e-2
